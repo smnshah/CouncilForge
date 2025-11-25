@@ -1,0 +1,9 @@
+simulation:
+  max_turns: 3
+  model_name: "llama3.1:8b"
+  llm_retries: 3
+  log_level: "INFO"
+
+world:
+  initial_resource_level: 50
+  initial_stability: 50

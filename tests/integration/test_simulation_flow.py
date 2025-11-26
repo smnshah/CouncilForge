@@ -73,6 +73,13 @@ class MockLLMClient:
                 amount=5,
                 reason="Agent1 improves food"
             )
+        elif self.turn_count == 2 and "You are Agent2" in prompt:
+            return Action(
+                type=ActionType.SEND_MESSAGE,
+                target="Agent1",
+                message="I appreciate your help!", # Friendly message
+                reason="Agent2 sends friendly message"
+            )
         else:
             return Action(
                 type=ActionType.SUPPORT_AGENT,
@@ -107,13 +114,23 @@ def test_simulation_flow(mock_llm_class, mock_load_config, mock_config):
     # Initial 50 -> 65
     assert controller.world.state.food == 65
     
-    # Agent2 supports Agent1 every turn -> +15 stability
-    # Initial 50 -> 65
-    assert controller.world.state.stability == 65
+    # Agent2 supports Agent1 in Turn 1 and 3 -> +10 stability
+    # Turn 2 was a message (no stability change)
+    # Initial 50 -> 60
+    assert controller.world.state.stability == 60
     
     # 4. Check relationships
     # Agent1 received support from Agent2
     agent1 = controller.agent_map["Agent1"]
     assert "Agent2" in agent1.relationships
     # 3 turns of support * 10 trust = 30 trust
-    assert agent1.relationships["Agent2"]["trust"] == 30
+    assert agent1.relationships["Agent2"].trust > 0
+    # Exact value depends on mix of support and message
+    # Turn 1: Support (+10)
+    # Turn 2: Message (Friendly -> +3)
+    # Turn 3: Support (+10)
+    # Total: 23
+    assert agent1.relationships["Agent2"].trust == 23
+    
+    # Check message effect
+    assert any("Received friendly message" in h for h in agent1.relationships["Agent2"].history)

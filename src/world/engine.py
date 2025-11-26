@@ -2,6 +2,7 @@ from typing import Tuple, List
 from loguru import logger
 from src.core.models import WorldState, Action, ActionType, Message
 from src.config.settings import WorldConfig
+from src.social.message_parser import parse_message_tone
 
 class World:
     def __init__(self, config: WorldConfig):
@@ -149,6 +150,7 @@ class World:
                     sender=agent_name,
                     recipient=action.target,
                     text=action.message,
+                    tone=parse_message_tone(action.message),
                     turn_sent=self.state.turn
                 )
                 self.state.message_queue.append(msg)

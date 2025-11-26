@@ -3,6 +3,10 @@ from typing import List, Dict, Optional
 from src.agents.base import BaseAgent
 from src.core.models import WorldState, Action, Persona, ActionType, Message
 from src.llm.client import LLMClient
+from src.social.relationship_engine import Relationship, update_relationship, apply_message_effects
+from src.social.decision_engine import compute_action_biases, apply_repetition_penalty
+from src.social.interaction_triggers import compute_interaction_triggers
+from src.social.prompt_builder import build_social_section
 
 class LLMAgent(BaseAgent):
     def __init__(self, persona: Persona, llm_client: LLMClient, history_depth: int = 6):
@@ -12,9 +16,13 @@ class LLMAgent(BaseAgent):
         self.history_depth = history_depth
         
         # Phase 2: Relationships and Messaging
-        # relationships[agent_name] = {"trust": int, "resentment": int}
-        self.relationships: Dict[str, Dict[str, int]] = {}
+        # Phase 2: Relationships and Messaging
+        self.relationships: Dict[str, Relationship] = {}
         self.message_inbox: List[Message] = []
+        
+        # Phase 3: History Tracking
+        self.recent_actions: List[str] = [] # My recent actions
+        self.recent_interactions: List[str] = [] # Interactions targeting me
 
     def update_history(self, turn_summary: str):
         """Adds a turn summary to the agent's history, maintaining the limit."""
@@ -25,6 +33,16 @@ class LLMAgent(BaseAgent):
     def receive_message(self, message: Message):
         """Receives a message and adds it to the inbox."""
         self.message_inbox.append(message)
+        
+        # Apply relationship effects immediately
+        if message.sender not in self.relationships:
+            self.relationships[message.sender] = Relationship()
+            
+        self.relationships[message.sender] = apply_message_effects(
+            self.relationships[message.sender],
+            message.tone,
+            message.text
+        )
 
     def process_action(self, action: Action, actor_name: str):
         """
@@ -34,21 +52,26 @@ class LLMAgent(BaseAgent):
             return
 
         if actor_name not in self.relationships:
-            self.relationships[actor_name] = {"trust": 0, "resentment": 0}
+            self.relationships[actor_name] = Relationship()
         
-        rel = self.relationships[actor_name]
+        # Update relationship using engine
+        # Note: update_relationship takes action_type string.
+        # We need to map ActionType enum to string if needed, but they are strings.
+        self.relationships[actor_name] = update_relationship(
+            self.relationships[actor_name],
+            action.type.value,
+            f"Observed action: {action.type.value} targeting {action.target}"
+        )
         
-        # Update rules
-        if action.type == ActionType.SUPPORT_AGENT and action.target == self.persona.name:
-            rel["trust"] += 10
-        elif action.type == ActionType.NEGOTIATE and action.target == self.persona.name:
-            rel["trust"] += 2
-        elif action.type == ActionType.TRADE and action.target == self.persona.name:
-            rel["trust"] += 5
-        elif action.type == ActionType.SABOTAGE and action.target == self.persona.name:
-            rel["resentment"] += 20
-        elif action.type == ActionType.OPPOSE_AGENT and action.target == self.persona.name:
-            rel["resentment"] += 5
+        # Track interactions targeting me
+        if action.target == self.persona.name:
+            interaction_desc = f"Turn {self.relationships[actor_name].history[-1] if self.relationships[actor_name].history else 'Unknown'}: {actor_name} {action.type.value} you"
+            # Or just use the description I just generated?
+            # The relationship history stores it.
+            # But I need a list for the prompt.
+            self.recent_interactions.append(f"{actor_name} {action.type.value}")
+            if len(self.recent_interactions) > 5:
+                self.recent_interactions.pop(0)
             
         # Clamp values? Spec doesn't say, but good practice. Let's keep them unbounded for now or 0-100.
         # Spec says "Clamp all values to >= 0" for world state. For relationships, maybe just let them grow.
@@ -56,13 +79,30 @@ class LLMAgent(BaseAgent):
     def _build_prompt(self, world_state: WorldState) -> str:
         history_text = "\n".join(self.history) if self.history else "No history yet."
         
-        relationships_text = json.dumps(self.relationships, indent=2) if self.relationships else "No relationships yet."
+        # Compute Social Context
+        # 1. Biases
+        biases = compute_action_biases(self, world_state, self.relationships)
+        # Apply repetition penalty
+        # We need recent actions. self.history contains summaries, not raw actions.
+        # But AgentState has recent_actions (Phase 3 update). 
+        # Wait, I haven't updated LLMAgent to store recent_actions in its state yet.
+        # I should add recent_actions to LLMAgent state.
+        # For now, I'll use empty list or extract from history if possible.
+        # Actually, I should update LLMAgent to track recent_actions.
+        # I'll do that in a separate edit or assume it's there.
+        # Let's assume self.recent_actions exists (I will add it in __init__)
         
-        messages_text = ""
-        if self.message_inbox:
-            messages_text = "\n".join([f"From {m.sender}: {m.text}" for m in self.message_inbox])
-        else:
-            messages_text = "No new messages."
+        # 2. Triggers
+        triggers = compute_interaction_triggers(self, world_state, self.recent_interactions)
+        
+        # Build Social Section
+        social_section = build_social_section(
+            self.relationships,
+            biases,
+            triggers,
+            self.recent_actions,
+            [m.model_dump() for m in self.message_inbox]
+        )
 
         return f"""
 You are {self.persona.name}.
@@ -89,11 +129,7 @@ Current World State:
 - Crisis Level: {world_state.crisis_level}
 - Overall Health: {world_state.overall_health}
 
-Relationships:
-{relationships_text}
-
-Messages Received:
-{messages_text}
+{social_section}
 
 Recent History:
 {history_text}
@@ -143,6 +179,12 @@ Example:
         
         try:
             action = self.llm_client.generate_action(prompt)
+            
+            # Track my recent actions
+            self.recent_actions.append(action.type.value)
+            if len(self.recent_actions) > 5:
+                self.recent_actions.pop(0)
+                
             return action
         except Exception as e:
             # Fallback if LLM fails or returns invalid JSON

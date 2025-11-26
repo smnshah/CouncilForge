@@ -35,13 +35,13 @@ def test_relationship_updates(agent):
     agent.process_action(action, "OtherAgent")
     
     assert "OtherAgent" in agent.relationships
-    assert agent.relationships["OtherAgent"]["trust"] == 10
+    assert agent.relationships["OtherAgent"].trust == 10
     
     # Sabotage -> Resentment +
     action = Action(type=ActionType.SABOTAGE, target="TestAgent", reason="test")
     agent.process_action(action, "OtherAgent")
     
-    assert agent.relationships["OtherAgent"]["resentment"] == 20
+    assert agent.relationships["OtherAgent"].resentment == 15
 
 def test_receive_message(agent):
     msg = Message(sender="Sender", recipient="TestAgent", text="Hi", turn_sent=1)
@@ -54,9 +54,17 @@ def test_prompt_building_clears_inbox(agent):
     agent.receive_message(msg)
     
     # Mock world state
+    # Mock world state
     mock_state = MagicMock()
     mock_state.turn = 1
     mock_state.resource_level = 50
+    mock_state.food = 50
+    mock_state.energy = 50
+    mock_state.infrastructure = 50
+    mock_state.morale = 50
+    mock_state.stability = 50
+    mock_state.crisis_level = 0
+    mock_state.overall_health = 50
     
     # Building prompt should clear inbox (in decide, actually)
     # But _build_prompt just reads it.

@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import List, Optional, Dict
 from pydantic import BaseModel, Field
+from src.social.relationship_engine import Relationship
 
 class ActionType(str, Enum):
     # Resource Actions
@@ -29,6 +30,7 @@ class Message(BaseModel):
     sender: str
     recipient: str
     text: str
+    tone: str = "neutral"
     turn_sent: int
 
 class Action(BaseModel):
@@ -59,6 +61,12 @@ class WorldState(BaseModel):
 
 class AgentState(BaseModel):
     last_action: Optional[str] = Field(None, description="The last action taken by the agent")
+    
+    # Phase 3 Fields
+    relationships: Dict[str, Relationship] = Field(default_factory=dict, description="Relationships with other agents")
+    recent_actions: List[str] = Field(default_factory=list, description="History of recent actions for diversity check")
+    messages_received: List[Message] = Field(default_factory=list, description="Messages received this turn")
+    recent_interactions_targeting_me: List[str] = Field(default_factory=list, description="Log of recent interactions targeting this agent")
 
 class Persona(BaseModel):
     name: str

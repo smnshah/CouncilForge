@@ -1,9 +1,14 @@
 simulation:
-  max_turns: 3
+  max_turns: 5
   model_name: "llama3.1:8b"
   llm_retries: 3
   log_level: "INFO"
+  history_depth: 6
 
 world:
   initial_resource_level: 50
   initial_stability: 50
+  initial_food: 50
+  initial_energy: 50
+  initial_infrastructure: 50
+  initial_morale: 50

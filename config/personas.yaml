@@ -7,6 +7,16 @@ personas:
     behavior_biases:
       - "Risk-averse"
       - "Protective"
+    # Phase 2 Traits
+    archetype: "Guardian"
+    core_values: ["Stability", "Tradition", "Security"]
+    dominant_trait: "Cautious"
+    secondary_trait: "Stubborn"
+    decision_biases: ["Status Quo Bias", "Loss Aversion"]
+    preferred_resources: ["infrastructure", "food"]
+    conflict_style: "passive"
+    cooperation_style: "selfish"
+    risk_preference: "low"
 
   - name: "Lyra the Progressive"
     description: "A young and ambitious visionary who wants to improve the world through rapid progress and spending."
@@ -16,6 +26,16 @@ personas:
     behavior_biases:
       - "Risk-tolerant"
       - "Generous"
+    # Phase 2 Traits
+    archetype: "Visionary"
+    core_values: ["Progress", "Equality", "Innovation"]
+    dominant_trait: "Ambitious"
+    secondary_trait: "Impulsive"
+    decision_biases: ["Optimism Bias", "Action Bias"]
+    preferred_resources: ["energy", "morale"]
+    conflict_style: "diplomatic"
+    cooperation_style: "helpful"
+    risk_preference: "high"
 
   - name: "Thorne the Pragmatist"
     description: "A hardened realist who balances the other two. He cares only about survival and practical outcomes."
@@ -25,3 +45,13 @@ personas:
     behavior_biases:
       - "Neutral"
       - "Calculated"
+    # Phase 2 Traits
+    archetype: "Realist"
+    core_values: ["Survival", "Efficiency", "Logic"]
+    dominant_trait: "Pragmatic"
+    secondary_trait: "Cynical"
+    decision_biases: ["Confirmation Bias"]
+    preferred_resources: ["food", "energy"]
+    conflict_style: "aggressive"
+    cooperation_style: "neutral"
+    risk_preference: "medium"

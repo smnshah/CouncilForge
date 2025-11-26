@@ -11,7 +11,7 @@ class LLMClient:
         self.retries = retries
         self.client = httpx.Client(base_url=base_url, timeout=30.0)
 
-    def generate_action(self, prompt: str) -> Action:
+    def generate_action(self, prompt: str, agent_name: Optional[str] = None) -> Action:
         """
         Sends a prompt to the LLM and expects a JSON response matching the Action schema.
         Retries on failure or invalid JSON.
@@ -19,7 +19,7 @@ class LLMClient:
         """
         for attempt in range(self.retries):
             try:
-                logger.debug(f"LLM Request (Attempt {attempt + 1}/{self.retries}):\n{prompt}")
+                logger.debug(f"LLM Request ({agent_name or 'Unknown Agent'}) (Attempt {attempt + 1}/{self.retries}):\n{prompt}")
                 
                 response = self.client.post(
                     "/api/generate",

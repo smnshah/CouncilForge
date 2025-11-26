@@ -5,8 +5,8 @@ from src.social.relationship_engine import Relationship
 
 class ActionType(str, Enum):
     # Resource Actions
-    INCREASE_RESOURCE = "increase_resource" # Legacy support? Spec says "improve_resource"
-    DECREASE_RESOURCE = "decrease_resource" # Legacy support? Spec says "consume_resource"
+    INCREASE_RESOURCE = "increase_resource" # Legacy support
+    DECREASE_RESOURCE = "decrease_resource" # Legacy support
     IMPROVE_RESOURCE = "improve_resource"
     CONSUME_RESOURCE = "consume_resource"
     BOOST_MORALE = "boost_morale"
@@ -19,6 +19,16 @@ class ActionType(str, Enum):
     REQUEST_HELP = "request_help"
     TRADE = "trade"
     SABOTAGE = "sabotage"
+    
+    # Phase 4 New Social Actions
+    FORM_ALLIANCE = "form_alliance"
+    DENOUNCE_AGENT = "denounce_agent"
+    OFFER_CONCESSION = "offer_concession"
+    DEMAND_CONCESSION = "demand_concession"
+    ACCUSE_AGENT = "accuse_agent"
+    OFFER_PROTECTION = "offer_protection"
+    SPREAD_RUMOR = "spread_rumor"
+    PROPOSE_POLICY = "propose_policy"
     
     # Messaging
     SEND_MESSAGE = "send_message"
@@ -39,7 +49,10 @@ class Action(BaseModel):
     resource: Optional[str] = Field(None, description="Resource type for resource actions")
     amount: Optional[int] = Field(5, description="Amount for resource actions")
     message: Optional[str] = Field(None, description="Content for messaging actions")
-    reason: str = Field(..., description="Short explanation for the action")
+    reason: Optional[str] = Field(None, description="Explanation for the action", alias="reasoning")
+    
+    class Config:
+        populate_by_name = True
 
 class WorldState(BaseModel):
     resource_level: int = Field(..., description="Current resource level of the world")
@@ -56,6 +69,7 @@ class WorldState(BaseModel):
     overall_health: int = Field(0, description="Derived overall health")
     
     message_queue: List[Message] = Field(default_factory=list, description="Queue of messages to be delivered")
+    policy_cooldowns: Dict[str, int] = Field(default_factory=dict, description="Cooldowns for policy proposals by agent")
     
     turn: int = Field(..., description="Current turn number")
 
@@ -67,12 +81,16 @@ class AgentState(BaseModel):
     recent_actions: List[str] = Field(default_factory=list, description="History of recent actions for diversity check")
     messages_received: List[Message] = Field(default_factory=list, description="Messages received this turn")
     recent_interactions_targeting_me: List[str] = Field(default_factory=list, description="Log of recent interactions targeting this agent")
+    
+    # Phase 4 Fields
+    emotions: Dict[str, Dict[str, float]] = Field(default_factory=dict, description="Emotions toward other agents")
+    goals: Dict[str, Optional[str]] = Field(default_factory=dict, description="Interpersonal goals")
 
 class Persona(BaseModel):
     name: str
     description: str
     goals: List[str]
-    behavior_biases: List[str] # Keeping for backward compatibility if needed, but spec says "decision_biases"
+    behavior_biases: List[str] # Keeping for backward compatibility
     
     # Phase 2 Traits
     archetype: str = "Generic"

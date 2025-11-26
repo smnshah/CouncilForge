@@ -1,12 +1,15 @@
 import json
 from typing import List, Dict, Optional
+import traceback
 from src.agents.base import BaseAgent
 from src.core.models import WorldState, Action, Persona, ActionType, Message
 from src.llm.client import LLMClient
 from src.social.relationship_engine import Relationship, update_relationship, apply_message_effects
-from src.social.decision_engine import compute_action_biases, apply_repetition_penalty
+from src.social.decision_engine import compute_action_biases, apply_repetition_penalty, get_top_actions, get_recommended_targets
 from src.social.interaction_triggers import compute_interaction_triggers
 from src.social.prompt_builder import build_social_section
+from src.social.emotion_engine import get_default_emotions, update_emotions, get_emotional_bias
+from src.social.interpersonal_goals import get_default_goals, update_goals
 
 class LLMAgent(BaseAgent):
     def __init__(self, persona: Persona, llm_client: LLMClient, history_depth: int = 6):
@@ -18,11 +21,16 @@ class LLMAgent(BaseAgent):
         # Phase 2: Relationships and Messaging
         # Phase 2: Relationships and Messaging
         self.relationships: Dict[str, Relationship] = {}
-        self.message_inbox: List[Message] = []
+        self.messages_received: List[Message] = []
         
         # Phase 3: History Tracking
         self.recent_actions: List[str] = [] # My recent actions
         self.recent_interactions: List[str] = [] # Interactions targeting me
+        
+        # Phase 4: Emotions and Goals
+        # emotions[agent_name] = {trust: float, ...}
+        self.emotions: Dict[str, Dict[str, float]] = {}
+        self.goals: Dict[str, Optional[str]] = get_default_goals()
 
     def update_history(self, turn_summary: str):
         """Adds a turn summary to the agent's history, maintaining the limit."""
@@ -32,7 +40,7 @@ class LLMAgent(BaseAgent):
 
     def receive_message(self, message: Message):
         """Receives a message and adds it to the inbox."""
-        self.message_inbox.append(message)
+        self.messages_received.append(message)
         
         # Apply relationship effects immediately
         if message.sender not in self.relationships:
@@ -55,143 +63,149 @@ class LLMAgent(BaseAgent):
             self.relationships[actor_name] = Relationship()
         
         # Update relationship using engine
-        # Note: update_relationship takes action_type string.
-        # We need to map ActionType enum to string if needed, but they are strings.
         self.relationships[actor_name] = update_relationship(
             self.relationships[actor_name],
             action.type.value,
             f"Observed action: {action.type.value} targeting {action.target}"
         )
         
+        # Update emotions
+        if actor_name not in self.emotions:
+            self.emotions[actor_name] = get_default_emotions()
+            
+        is_target = (action.target == self.persona.name)
+        self.emotions[actor_name] = update_emotions(
+            self.emotions[actor_name],
+            action.type.value,
+            is_target
+        )
+        
         # Track interactions targeting me
-        if action.target == self.persona.name:
+        if is_target:
             interaction_desc = f"Turn {self.relationships[actor_name].history[-1] if self.relationships[actor_name].history else 'Unknown'}: {actor_name} {action.type.value} you"
-            # Or just use the description I just generated?
-            # The relationship history stores it.
-            # But I need a list for the prompt.
             self.recent_interactions.append(f"{actor_name} {action.type.value}")
             if len(self.recent_interactions) > 5:
                 self.recent_interactions.pop(0)
-            
-        # Clamp values? Spec doesn't say, but good practice. Let's keep them unbounded for now or 0-100.
-        # Spec says "Clamp all values to >= 0" for world state. For relationships, maybe just let them grow.
 
-    def _build_prompt(self, world_state: WorldState) -> str:
-        history_text = "\n".join(self.history) if self.history else "No history yet."
+    def _build_prompt(self, world_state: WorldState, valid_targets: List[str]) -> str:
+        # Lite History (Last 2 turns)
+        history_text = "\n".join(self.history[-2:]) if self.history else "No history yet."
         
-        # Compute Social Context
-        # 1. Biases
-        biases = compute_action_biases(self, world_state, self.relationships)
-        # Apply repetition penalty
-        # We need recent actions. self.history contains summaries, not raw actions.
-        # But AgentState has recent_actions (Phase 3 update). 
-        # Wait, I haven't updated LLMAgent to store recent_actions in its state yet.
-        # I should add recent_actions to LLMAgent state.
-        # For now, I'll use empty list or extract from history if possible.
-        # Actually, I should update LLMAgent to track recent_actions.
-        # I'll do that in a separate edit or assume it's there.
-        # Let's assume self.recent_actions exists (I will add it in __init__)
+        # Compute Biases & Top Actions
+        avg_emotions = get_default_emotions()
+        if self.emotions:
+            count = len(self.emotions)
+            for em in self.emotions.values():
+                for k, v in em.items():
+                    avg_emotions[k] += v
+            for k in avg_emotions:
+                avg_emotions[k] /= count
         
-        # 2. Triggers
-        triggers = compute_interaction_triggers(self, world_state, self.recent_interactions)
+        biases = compute_action_biases(self, world_state, self.relationships, avg_emotions, self.goals)
+        biases = apply_repetition_penalty(biases, self.recent_actions)
         
-        # Build Social Section
-        social_section = build_social_section(
-            self.relationships,
-            biases,
-            triggers,
-            self.recent_actions,
-            [m.model_dump() for m in self.message_inbox]
-        )
+        top_actions = get_top_actions(biases, top_n=5)
+        top_actions_str = ", ".join(top_actions)
+        
+        # Recommended Targets
+        recommendations = get_recommended_targets(self, self.relationships)
+        rec_targets_str = ""
+        for cat, target in recommendations.items():
+            rec_targets_str += f"- For {cat}: {target}\n"
+        if not rec_targets_str:
+            rec_targets_str = "- None (No strong relationships yet)"
+
+        # Lite Relationships (Score > 5 or recent)
+        relationships_text = "Key Relationships:\n"
+        has_rels = False
+        if self.relationships:
+            for agent, rel in self.relationships.items():
+                if abs(rel.score) > 5:
+                    relationships_text += f"- {agent}: Trust {rel.trust}, Resentment {rel.resentment}\n"
+                    has_rels = True
+        if not has_rels:
+            relationships_text += "No significant relationships.\n"
 
         return f"""
 You are {self.persona.name}.
-Description: {self.persona.description}
 Archetype: {self.persona.archetype}
-Core Values: {', '.join(self.persona.core_values)}
-Dominant Trait: {self.persona.dominant_trait}
-Secondary Trait: {self.persona.secondary_trait}
-Decision Biases: {', '.join(self.persona.decision_biases)}
-Preferred Resources: {', '.join(self.persona.preferred_resources)}
-Conflict Style: {self.persona.conflict_style}
-Cooperation Style: {self.persona.cooperation_style}
-Risk Preference: {self.persona.risk_preference}
+Traits: {self.persona.dominant_trait}, {self.persona.secondary_trait}
 Goals: {', '.join(self.persona.goals)}
 
-Current World State:
-- Turn: {world_state.turn}
-- Resource Level: {world_state.resource_level}
-- Food: {world_state.food}
-- Energy: {world_state.energy}
-- Infrastructure: {world_state.infrastructure}
-- Morale: {world_state.morale}
-- Stability: {world_state.stability}
-- Crisis Level: {world_state.crisis_level}
-- Overall Health: {world_state.overall_health}
+World State:
+- Food: {world_state.food}, Energy: {world_state.energy}, Infra: {world_state.infrastructure}
+- Stability: {world_state.stability}, Crisis: {world_state.crisis_level}
 
-{social_section}
+{relationships_text}
 
 Recent History:
 {history_text}
 
-Allowed Actions:
-- improve_resource: Increases a specific resource (food, energy, infrastructure) by 5. Target: "world". Resource: "food"|"energy"|"infrastructure".
-- consume_resource: Decreases a specific resource by 5. Target: "world". Resource: "food"|"energy"|"infrastructure".
-- boost_morale: Increases morale by 5. Target: "world".
-- strengthen_infrastructure: Increases infrastructure by 5. Target: "world".
-- support_agent: Increases world stability by 5. Target: agent name.
-- oppose_agent: Decreases world stability by 5. Target: agent name.
-- negotiate: Social action. Target: agent name.
-- request_help: Social action. Target: agent name.
-- trade: Social action. Target: agent name.
-- sabotage: Decreases stability by 10. Target: agent name.
-- send_message: Sends a text message. Target: agent name. Message: "content".
-- pass: Do nothing. Target: "none".
+YOUR RECOMMENDED ACTIONS (Choose ONE):
+[{top_actions_str}]
 
-Instructions:
-1. Analyze the situation based on your persona, relationships, and history.
-2. Choose ONE action from the allowed list.
-3. Output ONLY a valid JSON object matching this schema:
+RECOMMENDED TARGETS:
+{rec_targets_str}
+
+Output Schema:
 {{
+  "reasoning": "1-2 sentences explaining why you chose this action.",
   "type": "action_type",
   "target": "target_name",
   "resource": "resource_name_if_applicable",
   "amount": 5,
-  "message": "message_content_if_applicable",
-  "reason": "short explanation"
+  "message": "message_content_if_applicable"
 }}
 
-Example:
-{{
-  "type": "improve_resource",
-  "target": "world",
-  "resource": "food",
-  "amount": 5,
-  "reason": "Food supplies are running low."
-}}
+Instructions:
+1. Choose ONE action from the Recommended Actions list.
+2. Use a Recommended Target if applicable.
+3. Resource actions MUST target "world".
+4. Social actions MUST target a specific agent.
+5. Output ONLY valid JSON.
 """
 
-    def decide(self, world_state: WorldState) -> Action:
-        prompt = self._build_prompt(world_state)
+    def decide(self, world_state: WorldState, valid_targets: List[str]) -> Action:
+        # 1. Update Goals based on current emotions and world state
+        # Ensure self emotions exist
+        if "self" not in self.emotions:
+            self.emotions["self"] = get_default_emotions()
+            
+        my_ambition = self.emotions["self"]["ambition"]
         
-        # Clear inbox after reading
-        self.message_inbox.clear()
+        # Iterate over all agents we have emotions toward
+        for target_name, emotions in self.emotions.items():
+            if target_name == "self":
+                continue
+                
+            self.goals = update_goals(
+                self.goals,
+                emotions,
+                target_name,
+                world_state.stability,
+                my_ambition
+            )
+            
+            
+        # 2. Build Prompt
+        prompt = self._build_prompt(world_state, valid_targets)
+        
+        # Clear inbox
+        self.messages_received.clear()
         
         try:
-            action = self.llm_client.generate_action(prompt)
+            # 3. Generate Action
+            action = self.llm_client.generate_action(prompt, self.persona.name)
             
-            # Track my recent actions
+            # 4. Update History
             self.recent_actions.append(action.type.value)
             if len(self.recent_actions) > 5:
                 self.recent_actions.pop(0)
                 
             return action
         except Exception as e:
-            # Fallback if LLM fails or returns invalid JSON
-            # The LLMClient might already handle retries, but if it fails, we return PASS
-            # Spec says "The code must attempt JSON auto-repair before fallback" - LLMClient likely handles this or we should.
-            # Assuming LLMClient.generate_action handles parsing and validation to some extent.
-            # If it raises, we return PASS.
+            print(f"DEBUG: LLMAgent decide error: {e}")
+            traceback.print_exc()
             return Action(
                 type=ActionType.PASS,
                 target="none",

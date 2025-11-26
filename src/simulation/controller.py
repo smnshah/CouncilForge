@@ -55,10 +55,13 @@ class SimulationController:
                 
                 # 2. Decide
                 logger.info(f"{agent.persona.name} is thinking...")
-                action = agent.decide(observation)
+                # Get list of other agents as valid targets
+                valid_targets = [a.persona.name for a in self.agents if a.persona.name != agent.persona.name]
+                action = agent.decide(observation, valid_targets)
                 
                 # 3. Apply
-                success, message = self.world.apply_action(agent.persona.name, action)
+                valid_agents = [a.persona.name for a in self.agents]
+                success, message = self.world.apply_action(agent.persona.name, action, valid_agents)
                 turn_events.append(f"Turn {current_turn + 1}: {message}")
                 
                 # 4. Broadcast Action to other agents (for relationship updates)

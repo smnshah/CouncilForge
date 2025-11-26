@@ -31,6 +31,15 @@ RELATIONSHIP_DELTAS = {
     "send_message_neutral": {"trust": 1, "resentment": 0},
     "send_message_friendly": {"trust": 3, "resentment": -1},
     "send_message_hostile": {"trust": -3, "resentment": 3},
+    # Phase 4 Actions
+    "form_alliance": {"trust": 15, "resentment": -5},
+    "denounce_agent": {"trust": -15, "resentment": 15},
+    "offer_concession": {"trust": 8, "resentment": -5},
+    "demand_concession": {"trust": -5, "resentment": 8},
+    "accuse_agent": {"trust": -10, "resentment": 10},
+    "offer_protection": {"trust": 12, "resentment": -2},
+    "spread_rumor": {"trust": -8, "resentment": 8},
+    "propose_policy": {"trust": 2, "resentment": 0}, # Slight trust boost for engagement
 }
 
 def update_relationship(

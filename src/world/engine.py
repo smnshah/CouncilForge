@@ -57,12 +57,44 @@ class World:
             self.state.morale
         ) // 5
 
-    def is_valid_action(self, action: Action) -> bool:
+    def is_valid_action(self, action: Action, agent_name: str, valid_agents: List[str]) -> Tuple[bool, str]:
         """
         Checks if an action is valid given the current state.
+        Returns (is_valid, error_message).
         """
-        # Basic validation logic
-        if action.type == ActionType.CONSUME_RESOURCE or action.type == ActionType.DECREASE_RESOURCE:
+        # 1. Target Validation
+        if action.target in [None, "", "null", "everyone", "anyone"]:
+            return False, f"Invalid target '{action.target}'. Must be specific agent or 'world'."
+            
+        if action.type in [
+            ActionType.IMPROVE_RESOURCE, ActionType.CONSUME_RESOURCE, 
+            ActionType.BOOST_MORALE, ActionType.STRENGTHEN_INFRASTRUCTURE
+        ]:
+            if action.target != "world":
+                return False, "Resource actions must target 'world'."
+                
+        elif action.type == ActionType.PROPOSE_POLICY:
+             if action.target != "world":
+                 return False, "Policy proposals must target 'world'."
+                 
+        elif action.type == ActionType.PASS:
+            pass # No target validation needed
+            
+        else:
+            # Social actions must target a valid agent
+            if action.target not in valid_agents:
+                return False, f"Target '{action.target}' is not a valid agent."
+            if action.target == agent_name:
+                return False, "Cannot target self."
+
+        # 2. Policy Cooldown
+        if action.type == ActionType.PROPOSE_POLICY:
+            last_turn = self.state.policy_cooldowns.get(agent_name, -100)
+            if self.state.turn - last_turn < 3:
+                return False, "Policy proposal is on cooldown (3 turns)."
+                
+        # 3. Resource Validation (Optional but good)
+        if action.type == ActionType.CONSUME_RESOURCE:
              # Check if we have enough resources? 
              # Spec doesn't strictly say we can't consume if 0, but "Clamp all values to >= 0" implies we can try but it stays 0.
              # However, usually you can't consume what you don't have.
@@ -70,15 +102,16 @@ class World:
              # Let's say if a specific resource is 0, we can't consume it.
              pass
         
-        return True
+        return True, ""
 
-    def apply_action(self, agent_name: str, action: Action) -> Tuple[bool, str]:
+    def apply_action(self, agent_name: str, action: Action, valid_agents: List[str]) -> Tuple[bool, str]:
         """
         Applies an action to the world state.
         Returns (success, message).
         """
-        if not self.is_valid_action(action):
-            return False, f"Action {action.type} invalid in current state."
+        is_valid, error_msg = self.is_valid_action(action, agent_name, valid_agents)
+        if not is_valid:
+            return False, f"Action {action.type} invalid: {error_msg}"
 
         message = ""
         success = True
@@ -144,6 +177,39 @@ class World:
             self.state.stability -= 10
             message = f"{agent_name} sabotaged {action.target}!"
 
+        # Phase 4 Actions
+        elif action.type == ActionType.FORM_ALLIANCE:
+            self.state.stability += 5
+            message = f"{agent_name} formed an alliance with {action.target}."
+            
+        elif action.type == ActionType.DENOUNCE_AGENT:
+            self.state.stability -= 5
+            message = f"{agent_name} denounced {action.target}."
+            
+        elif action.type == ActionType.OFFER_CONCESSION:
+            message = f"{agent_name} offered a concession to {action.target}."
+            
+        elif action.type == ActionType.DEMAND_CONCESSION:
+            self.state.stability -= 2
+            message = f"{agent_name} demanded a concession from {action.target}."
+            
+        elif action.type == ActionType.ACCUSE_AGENT:
+            self.state.stability -= 5
+            message = f"{agent_name} accused {action.target}."
+            
+        elif action.type == ActionType.OFFER_PROTECTION:
+            self.state.stability += 5
+            message = f"{agent_name} offered protection to {action.target}."
+            
+        elif action.type == ActionType.SPREAD_RUMOR:
+            self.state.stability -= 5
+            message = f"{agent_name} spread a rumor about {action.target}."
+            
+        elif action.type == ActionType.PROPOSE_POLICY:
+            self.state.stability += 2
+            self.state.policy_cooldowns[agent_name] = self.state.turn
+            message = f"{agent_name} proposed a policy: {action.message if action.message else 'Unknown'}."
+
         elif action.type == ActionType.SEND_MESSAGE:
             if action.message and action.target:
                 msg = Message(
@@ -175,3 +241,14 @@ class World:
 
     def increment_turn(self):
         self.state.turn += 1
+        
+        # World Entropy: Decay resources
+        decay_amount = 2
+        self.state.food = max(0, self.state.food - decay_amount)
+        self.state.energy = max(0, self.state.energy - decay_amount)
+        self.state.infrastructure = max(0, self.state.infrastructure - decay_amount)
+        
+        logger.info(f"World Entropy: Resources decayed by {decay_amount}.")
+        
+        # Recalculate metrics after decay
+        self._calculate_derived_metrics()

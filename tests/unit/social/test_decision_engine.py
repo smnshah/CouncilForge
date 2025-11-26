@@ -1,44 +1,42 @@
 import pytest
 from unittest.mock import MagicMock
-from src.social.decision_engine import compute_action_biases, apply_repetition_penalty, select_targets_based_on_relationships
+from src.social.decision_engine import compute_action_biases, apply_repetition_penalty, select_targets_based_on_relationships, get_top_actions, get_recommended_targets
 from src.social.relationship_engine import Relationship
 
 def test_compute_action_biases_defaults():
     agent_state = MagicMock()
-    world_state = MagicMock()
-    # Mock world state attributes to avoid errors
-    world_state.crisis_level = 0
-    world_state.stability = 100
-    world_state.morale = 100
+    emotions = {"trust": 0.0, "resentment": 0.0, "admiration": 0.0, "fear": 0.0}
+    goals = {}
     
-    biases = compute_action_biases(agent_state, world_state, {})
+    biases = compute_action_biases(agent_state, world_state, {}, emotions, goals)
     
-    # Check if all keys exist and sum to approx 1
-    assert "support_agent" in biases
-    assert sum(biases.values()) == pytest.approx(1.0)
+    # World actions boosted by +1.0 -> 1.25
+    assert biases["improve_resource"] == 1.25
+    # Social actions stay 1.0
+    assert biases["support_agent"] == 1.0
 
-def test_compute_action_biases_high_crisis():
+def test_compute_action_biases_goals():
     agent_state = MagicMock()
     world_state = MagicMock()
-    world_state.crisis_level = 80 # > 60
-    world_state.stability = 100
-    world_state.morale = 100
+    world_state.crisis_level = 0
     
-    biases = compute_action_biases(agent_state, world_state, {})
+    emotions = {"trust": 0.0, "resentment": 0.0, "admiration": 0.0, "fear": 0.0}
+    goals = {"ally_with": "AgentA"}
     
-    # Negotiate and request_help should be boosted
-    # We can't check exact values easily without reproducing logic, but we can check relative rank or existence
-    assert biases["negotiate"] > 0.1 # Default is 0.1, boosted by 0.1
-    assert biases["request_help"] > 0.1
+    biases = compute_action_biases(agent_state, world_state, {}, emotions, goals)
+    
+    # ally_with boosts form_alliance by 0.5 -> 1.5
+    assert biases["form_alliance"] == 1.5
 
 def test_apply_repetition_penalty():
-    biases = {"action_a": 0.5, "action_b": 0.5}
-    recent_actions = ["action_a", "action_a", "action_a"]
+    biases = {"action_a": 1.0, "action_b": 1.0}
+    recent_actions = ["action_a"]
     
     new_biases = apply_repetition_penalty(biases, recent_actions)
     
-    assert new_biases["action_a"] < 0.1 # Should be heavily penalized
-    assert new_biases["action_b"] == 0.5
+    # Penalty -0.75 -> 0.25
+    assert new_biases["action_a"] == 0.25
+    assert new_biases["action_b"] == 1.0
 
 def test_select_targets_based_on_relationships():
     rels = {
@@ -51,3 +49,24 @@ def test_select_targets_based_on_relationships():
     
     # Should be sorted by absolute score: AgentB (50), AgentA (10), AgentC (0)
     assert targets == ["AgentB", "AgentA", "AgentC"]
+
+def test_get_top_actions():
+    biases = {"action_a": 1.5, "action_b": 0.5, "action_c": 2.0}
+    top = get_top_actions(biases, top_n=2)
+    assert len(top) == 2
+    assert top[0] == "action_c"
+    assert top[1] == "action_a"
+
+def test_get_recommended_targets():
+    agent_state = MagicMock()
+    relationships = {
+        "AgentA": Relationship(trust=20, resentment=0),
+        "AgentB": Relationship(trust=0, resentment=15)
+    }
+    
+    recs = get_recommended_targets(agent_state, relationships)
+    
+    assert "support" in recs
+    assert "AgentA" in recs["support"]
+    assert "oppose" in recs
+    assert "AgentB" in recs["oppose"]

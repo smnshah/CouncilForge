@@ -1,97 +1,127 @@
-"""
-Decision Engine Module
-
-Calculates action biases and applies social pressure to agent decisions.
-"""
-from typing import Dict, List, Any, TYPE_CHECKING
+from typing import Dict, List, Any, TYPE_CHECKING, Optional
 from collections import Counter
+from src.social.emotion_engine import get_emotional_bias
 
 if TYPE_CHECKING:
     from src.core.models import AgentState, WorldState
     from src.social.relationship_engine import Relationship
 
+def get_persona_biases(persona_archetype: str) -> Dict[str, float]:
+    """Returns bias modifiers based on archetype."""
+    modifiers = {}
+    if persona_archetype == "Guardian":
+        modifiers["strengthen_infrastructure"] = 0.5
+        modifiers["support_agent"] = 0.3
+        modifiers["form_alliance"] = 0.3
+        modifiers["propose_policy"] = -0.2
+    elif persona_archetype == "Visionary":
+        modifiers["propose_policy"] = 0.5
+        modifiers["negotiate"] = 0.3
+        modifiers["improve_resource"] = 0.3
+    elif persona_archetype == "Realist":
+        modifiers["consume_resource"] = 0.2
+        modifiers["trade"] = 0.4
+        modifiers["oppose_agent"] = 0.2
+    elif persona_archetype == "Idealist":
+        modifiers["boost_morale"] = 0.5
+        modifiers["support_agent"] = 0.4
+        modifiers["offer_concession"] = 0.3
+    elif persona_archetype == "Agitator":
+        modifiers["oppose_agent"] = 0.5
+        modifiers["denounce_agent"] = 0.5
+        modifiers["spread_rumor"] = 0.5
+        modifiers["sabotage"] = 0.3
+    return modifiers
+
 def compute_action_biases(
     agent_state: "AgentState",
     world_state: "WorldState",
-    relationships: Dict[str, "Relationship"]
+    relationships: Dict[str, "Relationship"],
+    emotions: Dict[str, float],
+    goals: Dict[str, Optional[str]]
 ) -> Dict[str, float]:
     """
-    Computes weighted probabilities for actions based on traits and relationships.
+    Computes weighted probabilities for actions based on traits, relationships, emotions, and goals.
     """
-    biases = {
-        "support_agent": 0.1,
-        "oppose_agent": 0.1,
-        "negotiate": 0.1,
-        "request_help": 0.1,
-        "trade": 0.1,
-        "sabotage": 0.05,
-        "send_message": 0.1,
-        "improve_resource": 0.1,
-        "consume_resource": 0.1,
-        "boost_morale": 0.05,
-        "strengthen_infrastructure": 0.1
-    }
+    biases = {}
     
-    # 1. Personality Traits (Simplified for now)
-    # In a real implementation, we'd parse the persona traits.
-    # For now, we'll assume some defaults or look for keywords in persona description if available.
+    # Base Weights
+    SOCIAL_ACTION_BASE = 1.0
+    WORLD_ACTION_BASE = 0.25
     
-    # 2. Relationship Scores
-    avg_relationship_score = 0
-    if relationships:
-        scores = [r.score for r in relationships.values()]
-        avg_relationship_score = sum(scores) / len(scores)
+    social_actions = [
+        "support_agent", "oppose_agent", "negotiate", "request_help", "trade", "sabotage",
+        "form_alliance", "denounce_agent", "offer_concession", "demand_concession",
+        "accuse_agent", "offer_protection", "spread_rumor", "propose_policy", "send_message"
+    ]
+    
+    world_actions = [
+        "improve_resource", "consume_resource", "boost_morale", "strengthen_infrastructure"
+    ]
+    
+    # Initialize with base weights
+    for action in social_actions:
+        biases[action] = SOCIAL_ACTION_BASE
         
-    if avg_relationship_score > 20:
-        biases["support_agent"] += 0.1
-        biases["trade"] += 0.05
-        biases["send_message"] += 0.05
-    elif avg_relationship_score < -20:
-        biases["oppose_agent"] += 0.1
-        biases["sabotage"] += 0.05
-    elif -20 <= avg_relationship_score <= 20:
-        biases["negotiate"] += 0.1
+    for action in world_actions:
+        biases[action] = WORLD_ACTION_BASE
         
-    # 3. World Pressures
-    # Assuming world_state has these fields as per Phase 2 spec
-    if hasattr(world_state, "crisis_level") and world_state.crisis_level > 60:
-        biases["negotiate"] += 0.1
-        biases["request_help"] += 0.1
-        
-    if hasattr(world_state, "stability") and world_state.stability < 40:
-        biases["oppose_agent"] += 0.05
-        biases["sabotage"] += 0.05
-        
-    if hasattr(world_state, "morale") and world_state.morale < 40:
-        biases["send_message"] += 0.1
-        biases["support_agent"] += 0.05
-        
-    # Normalize (optional, but good for relative weights)
-    total = sum(biases.values())
-    if total > 0:
-        for k in biases:
-            biases[k] = round(biases[k] / total, 2)
+    # Crisis Override: If crisis is high, boost world actions
+    if world_state.crisis_level > 60:
+        for action in world_actions:
+            biases[action] += 1.0
             
+    # Persona Biases
+    persona_biases = get_persona_biases(agent_state.persona.archetype)
+    for action, mod in persona_biases.items():
+        if action in biases:
+            biases[action] += mod
+            
+    # Emotional Bias
+    emotional_biases = get_emotional_bias(emotions)
+    for action, bias in emotional_biases.items():
+        if action in biases:
+            biases[action] += bias
+            
+    # Goal Bonus (+0.5)
+    if goals.get("ally_with"):
+        biases["form_alliance"] += 0.5
+        biases["support_agent"] += 0.5
+        biases["offer_protection"] += 0.5
+        
+    if goals.get("undermine"):
+        biases["denounce_agent"] += 0.5
+        biases["sabotage"] += 0.5
+        biases["spread_rumor"] += 0.5
+        biases["oppose_agent"] += 0.5
+        
+    if goals.get("seek_approval_from"):
+        biases["offer_concession"] += 0.5
+        biases["support_agent"] += 0.5
+        
+    if goals.get("gain_influence_over"):
+        biases["demand_concession"] += 0.5
+        biases["accuse_agent"] += 0.5
+        
     return biases
 
-def apply_repetition_penalty(
-    biases: Dict[str, float],
-    recent_actions: List[str]
-) -> Dict[str, float]:
+def apply_repetition_penalty(biases: Dict[str, float], recent_actions: List[str]) -> Dict[str, float]:
     """
-    Lowers probability for actions repeated too often.
+    Applies a penalty to actions that have been performed recently.
     """
     if not recent_actions:
         return biases
         
-    # Check for strict repetition of last 3 actions
-    if len(recent_actions) >= 3:
-        last_three = recent_actions[-3:]
-        if all(a == last_three[0] for a in last_three):
-            repeated_action = last_three[0]
-            if repeated_action in biases:
-                biases[repeated_action] *= 0.1 # Heavy penalty
-                
+    # Penalty: -0.75 if repeating last action
+    last_action = recent_actions[-1]
+    
+    if last_action in biases:
+        biases[last_action] -= 0.75
+        
+    # Additional penalty for PROPOSE_POLICY if recently used (handled by world engine validation too, but soft bias helps)
+    if last_action == "propose_policy":
+        biases["propose_policy"] -= 2.0 # Strong penalty to prevent spam
+        
     return biases
 
 def merge_biases_into_prompt(biases: Dict[str, float]) -> str:
@@ -123,3 +153,38 @@ def select_targets_based_on_relationships(relationships: Dict[str, "Relationship
         reverse=True
     )
     return [name for name, _ in sorted_rels]
+
+def get_top_actions(biases: Dict[str, float], top_n: int = 5) -> List[str]:
+    """
+    Returns the top N actions based on bias scores.
+    """
+    sorted_biases = sorted(biases.items(), key=lambda x: x[1], reverse=True)
+    return [action for action, weight in sorted_biases[:top_n] if weight > 0]
+
+def get_recommended_targets(
+    agent_state: "AgentState",
+    relationships: Dict[str, "Relationship"]
+) -> Dict[str, str]:
+    """
+    Pre-computes the best target for each action type.
+    Returns a dictionary mapping action category to a description string.
+    """
+    recommendations = {}
+    
+    # Sort relationships
+    sorted_trust = sorted(relationships.items(), key=lambda x: x[1].trust, reverse=True)
+    sorted_resentment = sorted(relationships.items(), key=lambda x: x[1].resentment, reverse=True)
+    
+    # Cooperative Target (Highest Trust)
+    if sorted_trust:
+        target, rel = sorted_trust[0]
+        if rel.trust > 0:
+            recommendations["support"] = f"{target} (Trust: {rel.trust})"
+            
+    # Hostile Target (Highest Resentment)
+    if sorted_resentment:
+        target, rel = sorted_resentment[0]
+        if rel.resentment > 0:
+            recommendations["oppose"] = f"{target} (Resentment: {rel.resentment})"
+            
+    return recommendations

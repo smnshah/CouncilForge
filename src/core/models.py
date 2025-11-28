@@ -48,6 +48,12 @@ class WorldState(BaseModel):
     # Messaging System
     message_queue: List[Message] = Field(default_factory=list, description="Queue of messages to be delivered")
     
+    # Cost Modifiers (Phase 1.6: Support/Oppose mechanics)
+    cost_modifiers: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Agent name -> cost multiplier (0.5 for support, 1.5 for oppose). One-time use."
+    )
+    
     turn: int = Field(..., description="Current turn number")
 
 class AgentState(BaseModel):

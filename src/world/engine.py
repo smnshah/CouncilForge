@@ -15,6 +15,7 @@ class World:
     """
     
     def __init__(self, config: WorldConfig):
+        """Initialize world with configuration."""
         self.state = WorldState(
             treasury=config.initial_treasury,
             food=config.initial_food,
@@ -55,18 +56,21 @@ class World:
         
         self.state.crisis_level = max(0, 100 - avg_resources)
 
-    def _can_afford_action(self, action: ActionType) -> Tuple[bool, str, int, str]:
+    def _can_afford_action(self, action: ActionType, agent_name: str) -> Tuple[bool, str, int, str]:
         """
         Checks if the world can afford an action's cost.
+        Applies cost modifiers from support/oppose effects.
         Returns (can_afford, cost_resource, cost_amount, error_message)
         
-        Action Costs:
+        Action Costs (base):
         - improve_food: 3 energy
         - improve_energy: 3 treasury
         - improve_infrastructure: 4 treasury
         - boost_morale: 2 food
-        - social actions: free
-        - pass: free
+        
+        Modifiers:
+        - Supported: 0.5x cost (50% discount)
+        - Opposed: 1.5x cost (50% penalty)
         """
         cost_map = {
             ActionType.IMPROVE_FOOD: ("energy", 3),
@@ -79,13 +83,18 @@ class World:
             # Social actions and pass are free
             return True, "", 0, ""
         
-        cost_resource, cost_amount = cost_map[action]
+        cost_resource, base_cost = cost_map[action]
+        
+        # Apply cost modifier if agent has one
+        modifier = self.state.cost_modifiers.get(agent_name, 1.0)
+        actual_cost = int(base_cost * modifier)
+        
         current_amount = getattr(self.state, cost_resource)
         
-        if current_amount < cost_amount:
-            return False, cost_resource, cost_amount, f"Insufficient {cost_resource}: need {cost_amount}, have {current_amount}"
+        if current_amount < actual_cost:
+            return False, cost_resource, actual_cost, f"Insufficient {cost_resource}: need {actual_cost}, have {current_amount}"
         
-        return True, cost_resource, cost_amount, ""
+        return True, cost_resource, actual_cost, ""
 
     def _normalize_agent_name(self, name: str) -> str:
         """
@@ -96,6 +105,20 @@ class World:
         if not name:
             return ""
         return name.split()[0].lower()
+
+    def _get_modifier_text(self, agent_name: str) -> str:
+        """Get modifier status text for logging."""
+        modifier = self.state.cost_modifiers.get(agent_name, 1.0)
+        if modifier == 0.5:
+            return " [SUPPORTED - paid 50% less]"
+        elif modifier == 1.5:
+            return " [OPPOSED - paid 50% more]"
+        return ""
+    
+    def _clear_modifier(self, agent_name: str):
+        """Clear cost modifier after use (one-time effect)."""
+        if agent_name in self.state.cost_modifiers:
+            del self.state.cost_modifiers[agent_name]
 
     def is_valid_action(self, action: Action, agent_name: str, valid_agents: List[str]) -> Tuple[bool, str]:
         """
@@ -146,9 +169,9 @@ class World:
             return False, f"Unknown action type: {action.type}"
         
         # 2. Cost Check
-        can_afford, cost_resource, cost_amount, error_msg = self._can_afford_action(action.type)
+        can_afford, cost_resource, cost_amount, error_msg = self._can_afford_action(action.type, agent_name)
         if not can_afford:
-            return False, f"Cannot afford action: {error_msg}"
+            return False, f"Action validation failed: {error_msg}"
                 
         return True, ""
 
@@ -165,35 +188,82 @@ class World:
         message = ""
         success = True
 
-        # Resource Actions (with costs)
+        # Resource Actions (with costs and modifiers)
         if action.type == ActionType.IMPROVE_FOOD:
-            self.state.energy -= 3  # Cost
-            self.state.food += 8    # Benefit
-            message = f"{agent_name} improved food by 8 (cost: 3 energy)."
+            can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
+            if not can_afford:
+                return False, error
+            
+            # Deduct actual cost (with modifier applied)
+            self.state.energy -= actual_cost
+            self.state.food += 8
+            
+            # Show modifier status if applied
+            modifier_text = self._get_modifier_text(agent_name)
+            message = f"{agent_name} improved food by 8 (cost: {actual_cost} energy){modifier_text}."
+            
+            # Clear modifier after use
+            self._clear_modifier(agent_name)
 
         elif action.type == ActionType.IMPROVE_ENERGY:
-            self.state.treasury -= 3  # Cost
-            self.state.energy += 8     # Benefit
-            message = f"{agent_name} improved energy by 8 (cost: 3 treasury)."
+            can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
+            if not can_afford:
+                return False, error
+            
+            self.state.treasury -= actual_cost
+            self.state.energy += 8
+            
+            modifier_text = self._get_modifier_text(agent_name)
+            message = f"{agent_name} improved energy by 8 (cost: {actual_cost} treasury){modifier_text}."
+            
+            self._clear_modifier(agent_name)
 
         elif action.type == ActionType.IMPROVE_INFRASTRUCTURE:
-            self.state.treasury -= 4  # Cost
-            self.state.infrastructure += 8  # Benefit
-            message = f"{agent_name} improved infrastructure by 8 (cost: 4 treasury)."
+            can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
+            if not can_afford:
+                return False, error
+            
+            self.state.treasury -= actual_cost
+            self.state.infrastructure += 8
+            
+            modifier_text = self._get_modifier_text(agent_name)
+            message = f"{agent_name} improved infrastructure by 8 (cost: {actual_cost} treasury){modifier_text}."
+            
+            self._clear_modifier(agent_name)
 
         elif action.type == ActionType.BOOST_MORALE:
-            self.state.food -= 2  # Cost
-            self.state.morale += 8  # Benefit
-            message = f"{agent_name} boosted morale by 8 (cost: 2 food)."
+            can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
+            if not can_afford:
+                return False, error
+            
+            self.state.food -= actual_cost
+            self.state.morale += 8
+            
+            modifier_text = self._get_modifier_text(agent_name)
+            message = f"{agent_name} boosted morale by 8 (cost: {actual_cost} food){modifier_text}."
+            
+            self._clear_modifier(agent_name)
 
-        # Social Actions (free)
+        # Social Actions (free, but affect cost modifiers)
         elif action.type == ActionType.SUPPORT_AGENT:
-            self.state.morale += 5
-            message = f"{agent_name} supported {action.target} (+5 morale)."
+            # Apply 50% cost reduction for target's next action
+            normalized_target = self._normalize_agent_name(action.target)
+            target_agent = next((a for a in valid_agents if self._normalize_agent_name(a) == normalized_target), None)
+            
+            if target_agent:
+                self.state.cost_modifiers[target_agent] = 0.5
+                self.state.morale += 5
+                message = f"{agent_name} supported {target_agent} (+5 morale, {target_agent}'s next action costs 50% less)."
 
         elif action.type == ActionType.OPPOSE_AGENT:
-            self.state.morale -= 3
-            message = f"{agent_name} opposed {action.target} (-3 morale)."
+            # Apply 50% cost increase for target's next action
+            normalized_target = self._normalize_agent_name(action.target)
+            target_agent = next((a for a in valid_agents if self._normalize_agent_name(a) == normalized_target), None)
+            
+            if target_agent:
+                self.state.cost_modifiers[target_agent] = 1.5
+                self.state.morale -= 3
+                message = f"{agent_name} opposed {target_agent} (-3 morale, {target_agent}'s next action costs 50% more)."
 
         elif action.type == ActionType.SEND_MESSAGE:
             if action.message and action.target:

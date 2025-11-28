@@ -59,7 +59,17 @@ class LLMAgent(BaseAgent):
             self.relationships[actor_name],
             action.type.value,
             f"Turn action: {action.type.value}"
-       )
+        )
+    
+    def _get_modifier_status(self, world_state: WorldState) -> str:
+        """Show if agent has cost modifier active."""
+        if self.persona.name in world_state.cost_modifiers:
+            modifier = world_state.cost_modifiers[self.persona.name]
+            if modifier == 0.5:
+                return "\n*** YOU ARE SUPPORTED: Your next resource action costs 50% less! ***"
+            elif modifier == 1.5:
+                return "\n*** YOU ARE OPPOSED: Your next resource action costs 50% more! ***"
+        return ""
 
     def _build_prompt(self, world_state: WorldState, valid_targets: List[str]) -> str:
         """
@@ -82,6 +92,7 @@ Traits: {self.persona.dominant_trait}, {self.persona.secondary_trait}
 Goals: {', '.join(self.persona.goals)}"""
 
         # 2. World State (Simple Table)
+        modifier_status = self._get_modifier_status(world_state)
         world_section = f"""
 === WORLD STATE (Turn {world_state.turn + 1}) ===
 Treasury: {world_state.treasury}
@@ -91,7 +102,8 @@ Infrastructure: {world_state.infrastructure}
 Morale: {world_state.morale}
 Crisis: {world_state.crisis_level} {"(HIGH)" if world_state.crisis_level > 60 else "(MEDIUM)" if world_state.crisis_level > 30 else "(LOW)"}
 
-Note: Resources decay by 2 each turn due to natural consumption."""
+Note: Resources decay by 2 each turn due to natural consumption.
+{modifier_status}"""
 
         # 3. Recent History
         history_text = "\\n".join(self.history[-2:]) if self.history else "No history yet."
@@ -114,7 +126,7 @@ Note: Resources decay by 2 each turn due to natural consumption."""
 === YOUR RELATIONSHIPS ===
 {chr(10).join(rel_lines)}"""
 
-        # 5. Available Actions (with costs clearly shown)
+        # 5. Available Actions (Social actions first! With clear benefits)
         # Format other agents as a list - use just first names for clarity
         simplified_targets = [name.split()[0] for name in valid_targets] if valid_targets else []
         targets_str = ", ".join(simplified_targets) if simplified_targets else "None"
@@ -123,23 +135,25 @@ Note: Resources decay by 2 each turn due to natural consumption."""
 === AVAILABLE ACTIONS ===
 You must choose ONE action:
 
-RESOURCE ACTIONS (Have Costs):
-1. improve_food - Gain +8 food, costs 3 energy
-2. improve_energy - Gain +8 energy, costs 3 treasury
-3. improve_infrastructure - Gain +8 infrastructure, costs 4 treasury
-4. boost_morale - Gain +8 morale, costs 2 food
+SOCIAL ACTIONS (Free, affect next turn's costs):
+1. support_agent - Help another agent (they pay 50% less on their NEXT action, +5 morale)
+    Available targets: {targets_str}
+2. oppose_agent - Hinder another agent (they pay 50% more on their NEXT action, -3 morale)
+    Available targets: {targets_str}
+3. send_message - Send message to another agent (builds relationships)
+    Available targets: {targets_str}
 
-SOCIAL ACTIONS (Free):
-5. support_agent - Support another agent (improves relations, +5 morale)
-    Available targets: {targets_str}
-6. oppose_agent - Oppose another agent (damages relations, -3 morale)
-    Available targets: {targets_str}
-7. send_message - Send message to another agent (builds relationships)
-    Available targets: {targets_str}
+RESOURCE ACTIONS (Have Costs):
+4. improve_food - Gain +8 food, costs 3 energy
+5. improve_energy - Gain +8 energy, costs 3 treasury
+6. improve_infrastructure - Gain +8 infrastructure, costs 4 treasury
+7. boost_morale - Gain +8 morale, costs 2 food
 
 OTHER:
 8. pass - Do nothing this turn (no cost, no benefit)
 
+IMPORTANT: If you are SUPPORTED, your resource actions cost 50% less this turn!
+IMPORTANT: If you are OPPOSED, your resource actions cost 50% more this turn!
 IMPORTANT: Check if you can afford the cost before choosing resource actions!"""
 
         # 6. JSON Schema with Examples

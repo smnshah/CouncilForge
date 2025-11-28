@@ -2,8 +2,8 @@ personas:
   - name: "Eldric the Conservative"
     description: "An elderly council member who values stability and tradition above all else. He is skeptical of change and hoards resources."
     goals:
-      - "Maintain high stability"
-      - "Prevent resource depletion"
+      - "Keep infrastructure above 60"
+      - "Limit food spending to conserve energy"
     behavior_biases:
       - "Risk-averse"
       - "Protective"
@@ -21,8 +21,8 @@ personas:
   - name: "Lyra the Progressive"
     description: "A young and ambitious visionary who wants to improve the world through rapid progress and spending."
     goals:
-      - "Increase prosperity"
-      - "Distribute resources"
+      - "Keep food supply above 60"
+      - "Limit infrastructure spending to conserve treasury"
     behavior_biases:
       - "Risk-tolerant"
       - "Generous"
@@ -40,8 +40,8 @@ personas:
   - name: "Thorne the Pragmatist"
     description: "A hardened realist who balances the other two. He cares only about survival and practical outcomes."
     goals:
-      - "Ensure survival"
-      - "Balance the budget"
+      - "Keep treasury above 30"
+      - "Balance all resources within 10 points of each other"
     behavior_biases:
       - "Neutral"
       - "Calculated"

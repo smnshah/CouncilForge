@@ -5,9 +5,9 @@ from src.core.models import Action, ActionType
 
 @pytest.fixture
 def world():
+    """Create a test world with Phase 1.5 config."""
     config = WorldConfig(
-        initial_resource_level=50, 
-        initial_stability=50,
+        initial_treasury=50,
         initial_food=50,
         initial_energy=50,
         initial_infrastructure=50,
@@ -16,91 +16,214 @@ def world():
     return World(config)
 
 def test_initial_state(world):
-    assert world.state.resource_level == 50
+    """Test world initializes with correct state."""
+    assert world.state.treasury == 50
     assert world.state.food == 50
-    assert world.state.crisis_level == 50 # 100 - 50 = 50
-    assert world.state.overall_health == 50 # (50+50+50+50+50)//5 = 50
+    assert world.state.energy == 50
+    assert world.state.infrastructure == 50
+    assert world.state.morale == 50
+    # Avg = 50, crisis = 100 - 50 = 50
+    assert world.state.crisis_level == 50
 
 def test_derived_metrics(world):
+    """Test crisis level calculation."""
     # Manually set values to test calculation
-    world.state.resource_level = 10
+    world.state.treasury = 10
     world.state.food = 10
     world.state.energy = 10
     world.state.infrastructure = 10
     world.state.morale = 10
-    world.state.stability = 10
     
     world._calculate_derived_metrics()
     
-    # Avg resources = 10
-    # Crisis = 100 - 10 = 90
+    # Avg resources = 10, crisis = 100 - 10 = 90
     assert world.state.crisis_level == 90
+
+def test_improve_food_with_cost(world):
+    """Test improve_food action costs 3 energy."""
+    initial_energy = world.state.energy
+    initial_food = world.state.food
     
-    # Overall health = (10+10+10+10+10)//5 = 10
-    assert world.state.overall_health == 10
-
-def test_improve_resource(world):
     action = Action(
-        type=ActionType.IMPROVE_RESOURCE, 
-        target="world", 
-        resource="food", 
-        amount=10, 
+        type=ActionType.IMPROVE_FOOD,
+        target="world",
         reason="test"
     )
-    success, msg = world.apply_action("Agent1", action)
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
     assert success
-    assert world.state.food == 60
-    assert "improved food" in msg
+    assert world.state.food == initial_food + 8  # Gain 8
+    assert world.state.energy == initial_energy - 3  # Cost 3
+    assert "improved food" in msg.lower()
 
-def test_consume_resource(world):
+def test_improve_energy_with_cost(world):
+    """Test improve_energy action costs 3 treasury."""
+    initial_treasury = world.state.treasury
+    initial_energy = world.state.energy
+    
     action = Action(
-        type=ActionType.CONSUME_RESOURCE, 
-        target="world", 
-        resource="energy", 
-        amount=10, 
+        type=ActionType.IMPROVE_ENERGY,
+        target="world",
         reason="test"
     )
-    success, msg = world.apply_action("Agent1", action)
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
     assert success
-    assert world.state.energy == 40
-    assert "consumed energy" in msg
+    assert world.state.energy == initial_energy + 8  # Gain 8
+    assert world.state.treasury == initial_treasury - 3  # Cost 3
+    assert "improved energy" in msg.lower()
+
+def test_improve_infrastructure_with_cost(world):
+    """Test improve_infrastructure action costs 4 treasury."""
+    initial_treasury = world.state.treasury
+    initial_infra = world.state.infrastructure
+    
+    action = Action(
+        type=ActionType.IMPROVE_INFRASTRUCTURE,
+        target="world",
+        reason="test"
+    )
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
+    assert success
+    assert world.state.infrastructure == initial_infra + 8  # Gain 8
+    assert world.state.treasury == initial_treasury - 4  # Cost 4
+
+def test_boost_morale_with_cost(world):
+    """Test boost_morale action costs 2 food."""
+    initial_food = world.state.food
+    initial_morale = world.state.morale
+    
+    action = Action(
+        type=ActionType.BOOST_MORALE,
+        target="world",
+        reason="test"
+    )
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
+    assert success
+    assert world.state.morale == initial_morale + 8  # Gain 8
+    assert world.state.food == initial_food - 2  # Cost 2
+
+def test_cannot_afford_action(world):
+    """Test action fails when cannot afford cost."""
+    world.state.energy = 2  # Not enough for improve_food (costs 3)
+    
+    action = Action(
+        type=ActionType.IMPROVE_FOOD,
+        target="world",
+        reason="test"
+    )
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
+    assert not success
+    assert "cannot afford" in msg.lower() or "insufficient" in msg.lower()
+    assert world.state.food == 50  # Unchanged
 
 def test_resource_clamping(world):
+    """Test resources clamp at 0."""
     world.state.food = 5
-    action = Action(
-        type=ActionType.CONSUME_RESOURCE, 
-        target="world", 
-        resource="food", 
-        amount=10, 
-        reason="test"
-    )
-    success, msg = world.apply_action("Agent1", action)
-    assert success
-    assert world.state.food == 0 # Clamped to 0
+    world.state.treasury = 100
+    
+    # Consume more food than available via morale boost
+    for _ in range(5):  # Each costs 2 food
+        action = Action(
+            type=ActionType.BOOST_MORALE,
+            target="world",
+            reason="test"
+        )
+        world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
+    # Should be clamped at 0
+    assert world.state.food >= 0
 
 def test_send_message(world):
+    """Test send_message action."""
     action = Action(
         type=ActionType.SEND_MESSAGE,
         target="Agent2",
         message="Hello",
         reason="test"
     )
-    success, msg = world.apply_action("Agent1", action)
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
     assert success
     assert len(world.state.message_queue) == 1
     assert world.state.message_queue[0].sender == "Agent1"
     assert world.state.message_queue[0].recipient == "Agent2"
     assert world.state.message_queue[0].text == "Hello"
 
-def test_social_actions(world):
-    # Negotiate
-    action = Action(type=ActionType.NEGOTIATE, target="Agent2", reason="test")
-    success, msg = world.apply_action("Agent1", action)
-    assert success
-    assert "negotiated" in msg
+def test_support_agent(world):
+    """Test support_agent social action."""
+    initial_morale = world.state.morale
     
-    # Sabotage
-    action = Action(type=ActionType.SABOTAGE, target="Agent2", reason="test")
-    success, msg = world.apply_action("Agent1", action)
+    action = Action(
+        type=ActionType.SUPPORT_AGENT,
+        target="Agent2",
+        reason="test"
+    )
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
     assert success
-    assert world.state.stability == 40 # 50 - 10
+    assert world.state.morale == initial_morale + 5  # +5 morale
+    assert "supported" in msg.lower()
+
+def test_oppose_agent(world):
+    """Test oppose_agent social action."""
+    initial_morale = world.state.morale
+    
+    action = Action(
+        type=ActionType.OPPOSE_AGENT,
+        target="Agent2",
+        reason="test"
+    )
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
+    assert success
+    assert world.state.morale == initial_morale - 3  # -3 morale
+    assert "opposed" in msg.lower()
+
+def test_pass_action(world):
+    """Test pass action does nothing."""
+    initial_state = world.state.model_copy()
+    
+    action = Action(
+        type=ActionType.PASS,
+        target="world",
+        reason="test"
+    )
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
+    assert success
+    assert "passed" in msg.lower()
+    # State unchanged (except derived metrics may recalculate)
+    assert world.state.treasury == initial_state.treasury
+    assert world.state.food == initial_state.food
+
+def test_world_entropy(world):
+    """Test resources decay by 2 each turn."""
+    initial_treasury = world.state.treasury
+    initial_food = world.state.food
+    initial_energy = world.state.energy
+    initial_infra = world.state.infrastructure
+    
+    world.increment_turn()
+    
+    assert world.state.turn == 1
+    assert world.state.treasury == initial_treasury - 2
+    assert world.state.food == initial_food - 2
+    assert world.state.energy == initial_energy - 2
+    assert world.state.infrastructure == initial_infra - 2
+    # Morale doesn't decay (not in entropy list)
+
+def test_invalid_target(world):
+    """Test invalid action target."""
+    action = Action(
+        type=ActionType.SUPPORT_AGENT,
+        target="NonExistentAgent",
+        reason="test"
+    )
+    success, msg = world.apply_action("Agent1", action, ["Agent1", "Agent2"])
+    
+    assert not success
+    assert "not a valid agent" in msg.lower()

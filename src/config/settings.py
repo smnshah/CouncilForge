@@ -3,8 +3,7 @@ from pydantic import BaseModel
 from src.core.models import Persona
 
 class WorldConfig(BaseModel):
-    initial_resource_level: int = 50
-    initial_stability: int = 50
+    initial_treasury: int = 50
     initial_food: int = 50
     initial_energy: int = 50
     initial_infrastructure: int = 50

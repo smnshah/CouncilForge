@@ -1,36 +1,27 @@
+"""
+LLM Agent - Simplified Phase 1.5 Implementation
+
+Streamlined agent with minimal prompt complexity for llama3.1:8b compatibility.
+Focuses on clear, concise prompts with explicit action costs and examples.
+"""
+
 import json
-from typing import List, Dict, Optional
+from typing import List, Dict
 import traceback
 from src.agents.base import BaseAgent
-from src.core.models import WorldState, Action, Persona, ActionType, Message
+from src.core.models import WorldState, Action, Persona, ActionType
 from src.llm.client import LLMClient
 from src.social.relationship_engine import Relationship, update_relationship, apply_message_effects
-from src.social.decision_engine import compute_action_biases, apply_repetition_penalty, get_top_actions, get_recommended_targets
-from src.social.interaction_triggers import compute_interaction_triggers
-from src.social.prompt_builder import build_social_section
-from src.social.emotion_engine import get_default_emotions, update_emotions, get_emotional_bias
-from src.social.interpersonal_goals import get_default_goals, update_goals
 
 class LLMAgent(BaseAgent):
-    def __init__(self, persona: Persona, llm_client: LLMClient, history_depth: int = 6):
+    def __init__(self, persona: Persona, llm_client: LLMClient, history_depth: int = 2):
         super().__init__(persona)
         self.llm_client = llm_client
         self.history: List[str] = []
         self.history_depth = history_depth
         
-        # Phase 2: Relationships and Messaging
-        # Phase 2: Relationships and Messaging
+        # Simple relationship tracking (trust/resentment only)
         self.relationships: Dict[str, Relationship] = {}
-        self.messages_received: List[Message] = []
-        
-        # Phase 3: History Tracking
-        self.recent_actions: List[str] = [] # My recent actions
-        self.recent_interactions: List[str] = [] # Interactions targeting me
-        
-        # Phase 4: Emotions and Goals
-        # emotions[agent_name] = {trust: float, ...}
-        self.emotions: Dict[str, Dict[str, float]] = {}
-        self.goals: Dict[str, Optional[str]] = get_default_goals()
 
     def update_history(self, turn_summary: str):
         """Adds a turn summary to the agent's history, maintaining the limit."""
@@ -38,18 +29,19 @@ class LLMAgent(BaseAgent):
         if len(self.history) > self.history_depth:
             self.history.pop(0)
 
-    def receive_message(self, message: Message):
-        """Receives a message and adds it to the inbox."""
-        self.messages_received.append(message)
+    def receive_message(self, message):
+        """
+        Receives a message and updates relationships.
+        Phase 1.5: Simplified - just update relationship based on tone.
+        """
+        from src.core.models import Message
         
-        # Apply relationship effects immediately
         if message.sender not in self.relationships:
             self.relationships[message.sender] = Relationship()
             
         self.relationships[message.sender] = apply_message_effects(
             self.relationships[message.sender],
-            message.tone,
-            message.text
+            message.tone
         )
 
     def process_action(self, action: Action, actor_name: str):
@@ -62,152 +54,165 @@ class LLMAgent(BaseAgent):
         if actor_name not in self.relationships:
             self.relationships[actor_name] = Relationship()
         
-        # Update relationship using engine
+        # Update relationship based on action type
         self.relationships[actor_name] = update_relationship(
             self.relationships[actor_name],
             action.type.value,
-            f"Observed action: {action.type.value} targeting {action.target}"
-        )
-        
-        # Update emotions
-        if actor_name not in self.emotions:
-            self.emotions[actor_name] = get_default_emotions()
-            
-        is_target = (action.target == self.persona.name)
-        self.emotions[actor_name] = update_emotions(
-            self.emotions[actor_name],
-            action.type.value,
-            is_target
-        )
-        
-        # Track interactions targeting me
-        if is_target:
-            interaction_desc = f"Turn {self.relationships[actor_name].history[-1] if self.relationships[actor_name].history else 'Unknown'}: {actor_name} {action.type.value} you"
-            self.recent_interactions.append(f"{actor_name} {action.type.value}")
-            if len(self.recent_interactions) > 5:
-                self.recent_interactions.pop(0)
+            f"Turn action: {action.type.value}"
+       )
 
     def _build_prompt(self, world_state: WorldState, valid_targets: List[str]) -> str:
-        # Lite History (Last 2 turns)
-        history_text = "\n".join(self.history[-2:]) if self.history else "No history yet."
+        """
+        Builds a streamlined prompt for llama 8b model.
         
-        # Compute Biases & Top Actions
-        avg_emotions = get_default_emotions()
-        if self.emotions:
-            count = len(self.emotions)
-            for em in self.emotions.values():
-                for k, v in em.items():
-                    avg_emotions[k] += v
-            for k in avg_emotions:
-                avg_emotions[k] /= count
+        New structure:
+        1. Persona (concise)
+        2. World State (simple table)
+        3. Recent History (last 2 turns)
+        4. Relationships (if significant)
+        5. Available Actions (with costs)
+        6. JSON Schema (with examples)
+        7. Instructions (explicit steps)
+        """
         
-        biases = compute_action_biases(self, world_state, self.relationships, avg_emotions, self.goals)
-        biases = apply_repetition_penalty(biases, self.recent_actions)
-        
-        top_actions = get_top_actions(biases, top_n=5)
-        top_actions_str = ", ".join(top_actions)
-        
-        # Recommended Targets
-        recommendations = get_recommended_targets(self, self.relationships)
-        rec_targets_str = ""
-        for cat, target in recommendations.items():
-            rec_targets_str += f"- For {cat}: {target}\n"
-        if not rec_targets_str:
-            rec_targets_str = "- None (No strong relationships yet)"
-
-        # Lite Relationships (Score > 5 or recent)
-        relationships_text = "Key Relationships:\n"
-        has_rels = False
-        if self.relationships:
-            for agent, rel in self.relationships.items():
-                if abs(rel.score) > 5:
-                    relationships_text += f"- {agent}: Trust {rel.trust}, Resentment {rel.resentment}\n"
-                    has_rels = True
-        if not has_rels:
-            relationships_text += "No significant relationships.\n"
-
-        return f"""
-You are {self.persona.name}.
+        # 1. Persona Section
+        persona_section = f"""You are {self.persona.name}.
 Archetype: {self.persona.archetype}
 Traits: {self.persona.dominant_trait}, {self.persona.secondary_trait}
-Goals: {', '.join(self.persona.goals)}
+Goals: {', '.join(self.persona.goals)}"""
 
-World State:
-- Food: {world_state.food}, Energy: {world_state.energy}, Infra: {world_state.infrastructure}
-- Stability: {world_state.stability}, Crisis: {world_state.crisis_level}
+        # 2. World State (Simple Table)
+        world_section = f"""
+=== WORLD STATE (Turn {world_state.turn + 1}) ===
+Treasury: {world_state.treasury}
+Food: {world_state.food}
+Energy: {world_state.energy}
+Infrastructure: {world_state.infrastructure}
+Morale: {world_state.morale}
+Crisis: {world_state.crisis_level} {"(HIGH)" if world_state.crisis_level > 60 else "(MEDIUM)" if world_state.crisis_level > 30 else "(LOW)"}
 
-{relationships_text}
+Note: Resources decay by 2 each turn due to natural consumption."""
 
-Recent History:
-{history_text}
+        # 3. Recent History
+        history_text = "\\n".join(self.history[-2:]) if self.history else "No history yet."
+        history_section = f"""
+=== RECENT HISTORY ===
+{history_text}"""
 
-YOUR RECOMMENDED ACTIONS (Choose ONE):
-[{top_actions_str}]
+        # 4. Relationships (only if significant)
+        relationships_section = ""
+        if self.relationships:
+            rel_lines = []
+            for agent, rel in self.relationships.items():
+                if abs(rel.score) > 3:  # Only show significant relationships
+                    trust_str = f"+{rel.trust} trust" if rel.trust > 0 else f"{rel.trust} trust" if rel.trust < 0 else "0 trust"
+                    resent_str = f"+{rel.resentment} resentment" if rel.resentment > 0 else f"{rel.resentment} resentment" if rel.resentment < 0 else "0 resentment"
+                    rel_lines.append(f"{agent}: {trust_str}, {resent_str}")
+            
+            if rel_lines:
+                relationships_section = f"""
+=== YOUR RELATIONSHIPS ===
+{chr(10).join(rel_lines)}"""
 
-RECOMMENDED TARGETS:
-{rec_targets_str}
+        # 5. Available Actions (with costs clearly shown)
+        # Format other agents as a list - use just first names for clarity
+        simplified_targets = [name.split()[0] for name in valid_targets] if valid_targets else []
+        targets_str = ", ".join(simplified_targets) if simplified_targets else "None"
+        
+        actions_section = f"""
+=== AVAILABLE ACTIONS ===
+You must choose ONE action:
 
-Output Schema:
-{{
-  "reasoning": "1-2 sentences explaining why you chose this action.",
-  "type": "action_type",
-  "target": "target_name",
-  "resource": "resource_name_if_applicable",
-  "amount": 5,
-  "message": "message_content_if_applicable"
-}}
+RESOURCE ACTIONS (Have Costs):
+1. improve_food - Gain +8 food, costs 3 energy
+2. improve_energy - Gain +8 energy, costs 3 treasury
+3. improve_infrastructure - Gain +8 infrastructure, costs 4 treasury
+4. boost_morale - Gain +8 morale, costs 2 food
 
-Instructions:
-1. Choose ONE action from the Recommended Actions list.
-2. Use a Recommended Target if applicable.
-3. Resource actions MUST target "world".
-4. Social actions MUST target a specific agent.
-5. Output ONLY valid JSON.
-"""
+SOCIAL ACTIONS (Free):
+5. support_agent - Support another agent (improves relations, +5 morale)
+    Available targets: {targets_str}
+6. oppose_agent - Oppose another agent (damages relations, -3 morale)
+    Available targets: {targets_str}
+7. send_message - Send message to another agent (builds relationships)
+    Available targets: {targets_str}
+
+OTHER:
+8. pass - Do nothing this turn (no cost, no benefit)
+
+IMPORTANT: Check if you can afford the cost before choosing resource actions!"""
+
+        # 6. JSON Schema with Examples
+        schema_section = """
+=== OUTPUT FORMAT ===
+You MUST output ONLY valid JSON in this exact format:
+
+Example 1 (Resource Action):
+{
+  "reasoning": "Energy is at 48 and food is declining. Cost 3 energy to gain 8 food.",
+  "type": "improve_food",
+  "target": "world"
+}
+
+Example 2 (Social Action):
+{
+  "reasoning": "Thorne has shown hostility. I should respond to maintain my position.",
+  "type": "oppose_agent",
+  "target": "Thorne"
+}
+
+Example 3 (Message):
+{
+  "reasoning": "Lyra and I share common goals. Building alliance.",
+  "type": "send_message",
+  "target": "Lyra",
+  "message": "We should work together on infrastructure projects"
+}
+
+Example 4 (Cannot Afford):
+{
+  "reasoning": "Treasury is low (28), cannot afford improve_energy. Must pass or choose social action.",
+  "type": "pass",
+  "target": "world"
+}"""
+
+        # 7. Instructions
+        instructions_section = """
+=== INSTRUCTIONS ===
+1. Consider your goals and the current world state
+2. Check resource costs - you CANNOT choose actions you can't afford
+3. Choose the BEST action from the 8 options above
+4. Output ONLY the JSON, nothing else - no extra text before or after"""
+
+        # Combine all sections
+        full_prompt = f"""{persona_section}
+{world_section}
+{history_section}
+{relationships_section}
+{actions_section}
+{schema_section}
+{instructions_section}"""
+
+        return full_prompt
 
     def decide(self, world_state: WorldState, valid_targets: List[str]) -> Action:
-        # 1. Update Goals based on current emotions and world state
-        # Ensure self emotions exist
-        if "self" not in self.emotions:
-            self.emotions["self"] = get_default_emotions()
-            
-        my_ambition = self.emotions["self"]["ambition"]
-        
-        # Iterate over all agents we have emotions toward
-        for target_name, emotions in self.emotions.items():
-            if target_name == "self":
-                continue
-                
-            self.goals = update_goals(
-                self.goals,
-                emotions,
-                target_name,
-                world_state.stability,
-                my_ambition
-            )
-            
-            
-        # 2. Build Prompt
+        """
+        Decides on an action based on the current world state.
+        Returns an Action object.
+        """
+        # Build the prompt
         prompt = self._build_prompt(world_state, valid_targets)
         
-        # Clear inbox
-        self.messages_received.clear()
-        
         try:
-            # 3. Generate Action
+            # Generate action via LLM
             action = self.llm_client.generate_action(prompt, self.persona.name)
-            
-            # 4. Update History
-            self.recent_actions.append(action.type.value)
-            if len(self.recent_actions) > 5:
-                self.recent_actions.pop(0)
-                
             return action
+            
         except Exception as e:
             print(f"DEBUG: LLMAgent decide error: {e}")
             traceback.print_exc()
             return Action(
                 type=ActionType.PASS,
-                target="none",
+                target="world",
                 reason=f"Error generating action: {str(e)}"
             )

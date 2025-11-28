@@ -6,8 +6,7 @@ simulation:
   history_depth: 6
 
 world:
-  initial_resource_level: 50
-  initial_stability: 50
+  initial_treasury: 50
   initial_food: 50
   initial_energy: 50
   initial_infrastructure: 50

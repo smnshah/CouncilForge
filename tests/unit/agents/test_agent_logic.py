@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 from src.agents.llm_agent import LLMAgent
-from src.core.models import Persona, Action, ActionType, Message
+from src.core.models import Persona, Action, ActionType, Message, WorldState
 
 @pytest.fixture
 def mock_llm_client():
@@ -13,11 +13,13 @@ def agent(mock_llm_client):
         name="TestAgent",
         description="Test",
         goals=["Test"],
-        behavior_biases=[]
+        behavior_biases=[],
+        archetype="Realist"
     )
     return LLMAgent(persona, mock_llm_client, history_depth=3)
 
 def test_history_sliding_window(agent):
+    """Test history maintains sliding window of correct depth."""
     agent.update_history("Turn 1")
     agent.update_history("Turn 2")
     agent.update_history("Turn 3")
@@ -25,121 +27,86 @@ def test_history_sliding_window(agent):
     assert agent.history[0] == "Turn 1"
     
     agent.update_history("Turn 4")
-    assert len(agent.history) == 3
-    assert agent.history[0] == "Turn 2"
+    assert len(agent.history) == 3  # Still 3
+    assert agent.history[0] == "Turn 2"  # Oldest dropped
     assert agent.history[-1] == "Turn 4"
 
 def test_relationship_updates(agent):
-    # Support -> Trust +
+    """Test process_action updates relationships correctly (Phase 1.5 values)."""
+    # Support -> Trust +3
     action = Action(type=ActionType.SUPPORT_AGENT, target="TestAgent", reason="test")
     agent.process_action(action, "OtherAgent")
     
     assert "OtherAgent" in agent.relationships
-    assert agent.relationships["OtherAgent"].trust == 10
+    assert agent.relationships["OtherAgent"].trust == 3  # Phase 1.5 value
+    assert agent.relationships["OtherAgent"].resentment == -2  # Phase 1.5 value
     
-    # Sabotage -> Resentment +
-    action = Action(type=ActionType.SABOTAGE, target="TestAgent", reason="test")
-    agent.process_action(action, "OtherAgent")
+    # Oppose -> Resentment +3
+    action2 = Action(type=ActionType.OPPOSE_AGENT, target="TestAgent", reason="test")
+    agent.process_action(action2, "OtherAgent")
     
-    assert agent.relationships["OtherAgent"].resentment == 15
+    assert agent.relationships["OtherAgent"].trust == 0  # 3 + (-3)
+    assert agent.relationships["OtherAgent"].resentment == 1  # -2 + 3
 
 def test_receive_message(agent):
-    msg = Message(sender="Sender", recipient="TestAgent", text="Hi", turn_sent=1)
-    agent.receive_message(msg)
-    assert len(agent.message_inbox) == 1
-    assert agent.message_inbox[0].text == "Hi"
-
-def test_prompt_building_clears_inbox(agent):
-    msg = Message(sender="Sender", recipient="TestAgent", text="Hi", turn_sent=1)
+    """Test receive_message updates relationships based on tone."""
+    msg = Message(sender="Sender", recipient="TestAgent", text="Hi", tone="friendly", turn_sent=1)
     agent.receive_message(msg)
     
-    # Mock world state
-    # Mock world state
-    mock_state = MagicMock()
-    mock_state.turn = 1
-    mock_state.resource_level = 50
-    mock_state.food = 50
-    mock_state.energy = 50
-    mock_state.infrastructure = 50
-    mock_state.morale = 50
-    mock_state.stability = 50
-    mock_state.crisis_level = 0
-    mock_state.overall_health = 50
-import pytest
-from unittest.mock import MagicMock
-from src.agents.llm_agent import LLMAgent
-from src.core.models import Persona, Action, ActionType, Message
+    assert "Sender" in agent.relationships
+    assert agent.relationships["Sender"].trust == 3  # Friendly message
+    assert agent.relationships["Sender"].resentment == -1
 
-@pytest.fixture
-def mock_llm_client():
-    return MagicMock()
-
-@pytest.fixture
-def agent(mock_llm_client):
-    persona = Persona(
-        name="TestAgent",
-        description="Test",
-        goals=["Test"],
-        behavior_biases=[]
+def test_prompt_building_includes_relationships(agent):
+    """Test prompt includes significant relationships."""
+    # Add a significant relationship
+    action = Action(type=ActionType.SUPPORT_AGENT, target="TestAgent", reason="test")
+    for _ in range(5):  # Build up trust
+        agent.process_action(action, "FriendlyAgent")
+    
+    # Mock world state
+    mock_state = WorldState(
+        treasury=50,
+        food=50,
+        energy=50,
+        infrastructure=50,
+        morale=50,
+        turn=1
     )
-    return LLMAgent(persona, mock_llm_client, history_depth=3)
+    
+    prompt = agent._build_prompt(mock_state, ["FriendlyAgent"])
+    
+    # Should include relationship section
+    assert "FriendlyAgent" in prompt
+    assert "trust" in prompt.lower()
 
-def test_history_sliding_window(agent):
-    agent.update_history("Turn 1")
-    agent.update_history("Turn 2")
-    agent.update_history("Turn 3")
-    assert len(agent.history) == 3
-    assert agent.history[0] == "Turn 1"
+def test_decide_calls_llm(agent, mock_llm_client):
+    """Test decide method calls LLM client and returns action."""
+    # Mock LLM response
+    mock_llm_client.generate_action.return_value = Action(
+        type=ActionType.PASS,
+        target="world",
+        reason="test"
+    )
     
-    agent.update_history("Turn 4")
-    assert len(agent.history) == 3
-    assert agent.history[0] == "Turn 2"
-    assert agent.history[-1] == "Turn 4"
+    mock_state = WorldState(
+        treasury=50,
+        food=50,
+        energy=50,
+        infrastructure=50,
+        morale=50,
+        turn=1
+    )
+    
+    action = agent.decide(mock_state, ["Agent2"])
+    
+    assert action.type == ActionType.PASS
+    assert mock_llm_client.generate_action.called
 
-def test_relationship_updates(agent):
-    # Support -> Trust +
-    action = Action(type=ActionType.SUPPORT_AGENT, target="TestAgent", reason="test")
-    agent.process_action(action, "OtherAgent")
+def test_agent_ignores_self_actions(agent):
+    """Test agent doesn't update relationships for its own actions."""
+    action = Action(type=ActionType.SUPPORT_AGENT, target="Someone", reason="test")
+    agent.process_action(action, "TestAgent")  # Same as agent's name
     
-    assert "OtherAgent" in agent.relationships
-    assert agent.relationships["OtherAgent"].trust == 10
-    
-    # Sabotage -> Resentment +
-    action = Action(type=ActionType.SABOTAGE, target="TestAgent", reason="test")
-    agent.process_action(action, "OtherAgent")
-    
-    assert agent.relationships["OtherAgent"].resentment == 15
-
-def test_receive_message(agent):
-    msg = Message(sender="Sender", recipient="TestAgent", text="Hi", turn_sent=1)
-    agent.receive_message(msg)
-    assert len(agent.message_inbox) == 1
-    assert agent.message_inbox[0].text == "Hi"
-
-def test_prompt_building_clears_inbox(agent):
-    msg = Message(sender="Sender", recipient="TestAgent", text="Hi", turn_sent=1)
-    agent.receive_message(msg)
-    
-    # Mock world state
-    # Mock world state
-    mock_world_state = MagicMock()
-    mock_world_state.turn = 1
-    mock_world_state.resource_level = 50
-    mock_world_state.food = 50
-    mock_world_state.energy = 50
-    mock_world_state.infrastructure = 50
-    mock_world_state.morale = 50
-    mock_world_state.stability = 50
-    mock_world_state.crisis_level = 0
-    mock_world_state.overall_health = 50
-    
-    # Building prompt should clear inbox (in decide, actually)
-    # But _build_prompt just reads it.
-    # decide() calls _build_prompt then clears.
-    
-    agent.llm_client.generate_action.return_value = Action(type=ActionType.PASS, target="none", reason="pass")
-    # Mock valid targets
-    valid_targets = ["Agent2"]
-    action = agent.decide(mock_world_state, valid_targets)
-    
-    assert len(agent.message_inbox) == 0
+    # Should not track relationship with self
+    assert "TestAgent" not in agent.relationships

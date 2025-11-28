@@ -7,6 +7,7 @@ from src.config.settings import Config, SimulationSettings, WorldConfig
 # Mock Config
 @pytest.fixture
 def mock_config():
+    """Create a Phase 1.5 compatible mock config."""
     return Config(
         simulation=SimulationSettings(
             max_turns=3,
@@ -16,8 +17,7 @@ def mock_config():
             history_depth=2
         ),
         world=WorldConfig(
-            initial_resource_level=50,
-            initial_stability=50,
+            initial_treasury=50,  # Phase 1.5: treasury instead of resource_level
             initial_food=50,
             initial_energy=50,
             initial_infrastructure=50,
@@ -29,10 +29,10 @@ def mock_config():
                 description="D1", 
                 goals=["G1"], 
                 behavior_biases=["B1"],
-                archetype="A1",
+                archetype="Guardian",
                 core_values=["V1"],
-                dominant_trait="T1",
-                secondary_trait="T2",
+                dominant_trait="Cautious",
+                secondary_trait="Protective",
                 decision_biases=["DB1"],
                 preferred_resources=["food"],
                 conflict_style="diplomatic",
@@ -44,10 +44,10 @@ def mock_config():
                 description="D2", 
                 goals=["G2"], 
                 behavior_biases=["B2"],
-                archetype="A2",
+                archetype="Visionary",
                 core_values=["V2"],
-                dominant_trait="T3",
-                secondary_trait="T4",
+                dominant_trait="Ambitious",
+                secondary_trait="Impulsive",
                 decision_biases=["DB2"],
                 preferred_resources=["energy"],
                 conflict_style="aggressive",
@@ -59,33 +59,37 @@ def mock_config():
 
 # Mock LLM Client
 class MockLLMClient:
+    """Mock LLM client that returns Phase 1.5 compatible actions."""
     def __init__(self, model_name, retries):
         self.turn_count = 0
     
     def generate_action(self, prompt, agent_name=None):
+        """Return deterministic Phase 1.5 actions."""
         self.turn_count += 1
-        # Return deterministic actions based on prompt content or just cycling
-        if "You are Agent1" in prompt:
+        
+        # Agent1: Improves food (which costs energy)
+        if "You are Agent1" in prompt or agent_name == "Agent1":
             return Action(
-                type=ActionType.IMPROVE_RESOURCE,
+                type=ActionType.IMPROVE_FOOD,
                 target="world",
-                resource="food",
-                amount=5,
                 reason="Agent1 improves food"
             )
-        elif self.turn_count == 2 and "You are Agent2" in prompt:
-            return Action(
-                type=ActionType.SEND_MESSAGE,
-                target="Agent1",
-                message="I appreciate your help!", # Friendly message
-                reason="Agent2 sends friendly message"
-            )
+        # Agent2: Supports Agent1 (social action, free)
         else:
-            return Action(
-                type=ActionType.SUPPORT_AGENT,
-                target="Agent1",
-                reason="Agent2 supports Agent1"
-            )
+            if self.turn_count == 2:
+                # Turn 2: Send a message
+                return Action(
+                    type=ActionType.SEND_MESSAGE,
+                    target="Agent1",
+                    message="Great work on the food supply!",
+                    reason="Agent2 sends encouragement"
+                )
+            else:
+                return Action(
+                    type=ActionType.SUPPORT_AGENT,
+                    target="Agent1",
+                    reason="Agent2 supports Agent1"
+                )
     
     def close(self):
         pass
@@ -93,6 +97,7 @@ class MockLLMClient:
 @patch('src.simulation.controller.load_config')
 @patch('src.simulation.controller.LLMClient', side_effect=MockLLMClient)
 def test_simulation_flow(mock_llm_class, mock_load_config, mock_config):
+    """Test full simulation flow with Phase 1.5 implementation."""
     # Setup mocks
     mock_load_config.return_value = mock_config
     
@@ -109,72 +114,40 @@ def test_simulation_flow(mock_llm_class, mock_load_config, mock_config):
     # 2. Agents should have been initialized
     assert len(controller.agents) == 2
     
-    # 3. Check world state changes
-    # Agent1 improves food every turn (3 turns) -> +15 food
-    # Initial 50 -> 65
-    assert controller.world.state.food == 65
+    # 3. Check world state changes (Phase 1.5 behavior)
+    # Agent1 improves food every turn (3 turns):
+    #   Each action: +8 food, -3 energy
+    #   3 actions: +24 food, -9 energy
+    # World entropy: -2 per turn for 3 turns = -6 from each resource
+    # Food: 50 + 24 - 6 = 68
+    # Energy: 50 - 9 - 6 = 35
+    assert controller.world.state.food == 68
+    assert controller.world.state.energy == 35
     
-    # Agent2 supports Agent1 in Turn 1 and 3 -> +10 stability
-    # Turn 2 was a message (no stability change)
-    # Initial 50 -> 60
-    # Phase 4: Support adds +5 stability.
-    # Turn 1: Support (+5)
-    # Turn 2: Message (0)
-    # Turn 3: Support (+5)
-    # Total: 60
-    assert controller.world.state.stability == 60
+    # Agent2 supports Agent1 in Turn 1 and 3, sends message Turn 2
+    # Support actions: +5 morale each
+    # 2 support actions = +10 morale
+    # Morale doesn't decay, so: 50 + 10 = 60
+    assert controller.world.state.morale == 60
     
-    # 4. Check relationships
+    # 4. Check relationships (Phase 1.5: smaller deltas)
     # Agent1 received support from Agent2
     agent1 = controller.agent_map["Agent1"]
     assert "Agent2" in agent1.relationships
-    # 3 turns of support * 10 trust = 30 trust
-    assert agent1.relationships["Agent2"].trust > 0
-    # Agent1 received support from Agent2
-    # Support -> +5 Trust (Phase 4)
-    # Turn 1: Support (+5)
-    # Turn 2: Message (Friendly -> +2 Trust in Phase 4? No, message parser says +3? 
-    # Let's check emotion_engine.py. It doesn't handle SEND_MESSAGE explicitly in update_emotions?
-    # Wait, I didn't add SEND_MESSAGE to update_emotions!
-    # I should fix that or assume it has no effect?
-    # Phase 3 had apply_message_effects.
-    # LLMAgent.receive_message calls apply_message_effects?
-    # Let's check LLMAgent.receive_message.
-    # It calls apply_message_effects from relationship_engine.
-    # But we want to use emotion_engine now.
-    # I need to update receive_message to use emotion_engine.
     
-    # For now, let's assume I fix receive_message.
-    # If I don't fix it, this test might fail or use old logic.
-    # LLMAgent.receive_message still uses apply_message_effects from relationship_engine.
-    # relationship_engine updates Relationship object.
-    # emotion_engine updates self.emotions.
-    # We have TWO parallel systems now?
-    # Spec says "Transform...".
-    # We should probably migrate fully to emotions?
-    # But Relationship object is still used in decision_engine (relation_bonus).
-    # So both exist.
-    # Relationship.trust vs Emotions["trust"].
-    # This is confusing.
-    # Spec 2.4: "relation_bonus = (trust - resentment) / 50".
-    # Is this trust from Relationship or Emotions?
-    # "emotion_bias = derived from emotion_engine".
-    # "relation_bonus" seems to refer to the old Relationship model?
-    # Or maybe we should sync them?
-    # For this test, I'll check Relationship trust (old system) if it's still updated.
-    # LLMAgent.process_action updates BOTH.
-    # So Relationship.trust should increase.
-    # Support -> +10 Trust (Relationship Engine default)
-    # Support -> +5 Trust (Emotion Engine default)
+    # Phase 1.5 relationship deltas:
+    # Support: +3 trust, -2 resentment
+    # Message (friendly): +3 trust, -1 resentment
+    # Turn 1: Support (+3 trust, -2 resentment)
+    # Turn 2: Message (+3 trust, -1 resentment)
+    # Turn 3: Support (+3 trust, -2 resentment)
+    # Total: +9 trust, -5 resentment
+    assert agent1.relationships["Agent2"].trust == 9
+    assert agent1.relationships["Agent2"].resentment == -5
     
-    # Let's check Relationship Engine update_relationship logic.
-    # It adds +10 for support.
-    
-    # Turn 1: Support (+10)
-    # Turn 2: Message (+3)
-    # Turn 3: Support (+10)
-    # Total: 23
-    assert agent1.relationships["Agent2"].trust == 23
-    
-    # Check message effect
-    assert any("Received friendly message" in h for h in agent1.relationships["Agent2"].history)
+    # 5. Treasury should have decayed
+    # Initial: 50
+    # No treasury used (no improve_energy or improve_infrastructure)
+    # World entropy: -2 per turn * 3 turns = -6
+    # Final: 50 - 6 = 44
+    assert controller.world.state.treasury == 44

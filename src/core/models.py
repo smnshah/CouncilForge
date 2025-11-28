@@ -4,36 +4,18 @@ from pydantic import BaseModel, Field
 from src.social.relationship_engine import Relationship
 
 class ActionType(str, Enum):
-    # Resource Actions
-    INCREASE_RESOURCE = "increase_resource" # Legacy support
-    DECREASE_RESOURCE = "decrease_resource" # Legacy support
-    IMPROVE_RESOURCE = "improve_resource"
-    CONSUME_RESOURCE = "consume_resource"
+    # Resource Actions (4)
+    IMPROVE_FOOD = "improve_food"
+    IMPROVE_ENERGY = "improve_energy"
+    IMPROVE_INFRASTRUCTURE = "improve_infrastructure"
     BOOST_MORALE = "boost_morale"
-    STRENGTHEN_INFRASTRUCTURE = "strengthen_infrastructure"
     
-    # Social Actions
+    # Social Actions (3)
     SUPPORT_AGENT = "support_agent"
     OPPOSE_AGENT = "oppose_agent"
-    NEGOTIATE = "negotiate"
-    REQUEST_HELP = "request_help"
-    TRADE = "trade"
-    SABOTAGE = "sabotage"
-    
-    # Phase 4 New Social Actions
-    FORM_ALLIANCE = "form_alliance"
-    DENOUNCE_AGENT = "denounce_agent"
-    OFFER_CONCESSION = "offer_concession"
-    DEMAND_CONCESSION = "demand_concession"
-    ACCUSE_AGENT = "accuse_agent"
-    OFFER_PROTECTION = "offer_protection"
-    SPREAD_RUMOR = "spread_rumor"
-    PROPOSE_POLICY = "propose_policy"
-    
-    # Messaging
     SEND_MESSAGE = "send_message"
     
-    # Other
+    # Other (1)
     PASS = "pass"
 
 class Message(BaseModel):
@@ -46,8 +28,6 @@ class Message(BaseModel):
 class Action(BaseModel):
     type: ActionType
     target: str = Field(..., description="Target of the action (e.g., 'world' or agent name)")
-    resource: Optional[str] = Field(None, description="Resource type for resource actions")
-    amount: Optional[int] = Field(5, description="Amount for resource actions")
     message: Optional[str] = Field(None, description="Content for messaging actions")
     reason: Optional[str] = Field(None, description="Explanation for the action", alias="reasoning")
     
@@ -55,21 +35,18 @@ class Action(BaseModel):
         populate_by_name = True
 
 class WorldState(BaseModel):
-    resource_level: int = Field(..., description="Current resource level of the world")
-    stability: int = Field(..., description="Current stability level of the world")
+    # Core Resources
+    treasury: int = Field(..., description="Nation's wealth/budget for development")
+    food: int = Field(..., description="Food supply level")
+    energy: int = Field(..., description="Energy level")
+    infrastructure: int = Field(..., description="Infrastructure level")
+    morale: int = Field(..., description="Public morale level")
     
-    # New Phase 2 Fields
-    food: int = Field(0, description="Food level")
-    energy: int = Field(0, description="Energy level")
-    infrastructure: int = Field(0, description="Infrastructure level")
-    morale: int = Field(0, description="Morale level")
+    # Derived Metrics
+    crisis_level: int = Field(0, description="Derived crisis indicator (0-100)")
     
-    # Derived metrics
-    crisis_level: int = Field(0, description="Derived crisis level")
-    overall_health: int = Field(0, description="Derived overall health")
-    
+    # Messaging System
     message_queue: List[Message] = Field(default_factory=list, description="Queue of messages to be delivered")
-    policy_cooldowns: Dict[str, int] = Field(default_factory=dict, description="Cooldowns for policy proposals by agent")
     
     turn: int = Field(..., description="Current turn number")
 

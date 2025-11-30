@@ -191,7 +191,8 @@ class LLMAgent(BaseAgent):
         
         last_3 = self.recent_actions[-3:]
         if len(set(last_3)) == 1:  # All same action
-            return f"⚠️ PATTERN WARNING: You've chosen '{last_3[0]}' 3 times in a row. Consider alternatives."
+            action_name = last_3[0]
+            return f"Recently, you have repeatedly chosen the action: {action_name}. To stay competitive and responsive to the changing situation, YOU MUST avoid repeating these actions this turn unless absolutely necessary."
         
         return None
     
@@ -291,7 +292,8 @@ POLITICAL MOVES (always free):
   Targets: {targets_str}
 
 RESOURCE MOVES (check affordability table):
-• improve_food, improve_energy, improve_infrastructure, boost_morale
+• improve_food, improve_energy, improve_infrastructure
+• boost_morale
 • generate_treasury - Convert energy to treasury (4 energy → 3 treasury)
 
 OTHER:
@@ -326,13 +328,18 @@ Example 3 (Resource Action):
 }"""
 
         # 10. Instructions - FOCUS ON STRATEGY, NOT ARITHMETIC
-        instructions_section = """
+        strategy_tip = ""
+        if self.recent_actions and self.recent_actions[-1] == 'send_message':
+            strategy_tip = "\nSTRATEGY TIP: You just sent a message. Consider backing up your words with a concrete action (support/oppose/resource) to show strength, unless you need to continue the conversation to secure a deal."
+
+        instructions_section = f"""
 === DECISION PROCESS ===
 1. Review your GOALS - what are you trying to achieve?
 2. Check the AFFORDABILITY TABLE - what resource actions can you afford?
 3. Consider RELATIONSHIPS - who are your allies and rivals?
 4. Consider TRENDS - which resources are collapsing or rising?
-5. Choose the action that best serves your goals
+5. Choose the action that best serves your goals. While messaging drives the simulation, actions drive the MECHANICS.
+{strategy_tip}
 
 IMPORTANT:
 • Social actions are FREE and always available

@@ -44,12 +44,12 @@ def test_message_model():
     msg = Message(
         sender="AgentA",
         recipient="AgentB",
-        text="Hello",
+        content="Hello",
         turn_sent=1
     )
     assert msg.sender == "AgentA"
-    assert msg.text == "Hello"
-    assert msg.tone == "neutral"  # Default
+    assert msg.content == "Hello"
+
 
 def test_persona_model_defaults():
     """Test Persona model with default values."""

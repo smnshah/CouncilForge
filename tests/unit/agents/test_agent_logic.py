@@ -50,12 +50,12 @@ def test_relationship_updates(agent):
 
 def test_receive_message(agent):
     """Test receive_message updates relationships based on tone."""
-    msg = Message(sender="Sender", recipient="TestAgent", text="Hi", tone="friendly", turn_sent=1)
+    msg = Message(sender="Sender", recipient="TestAgent", content="Hi friend", turn_sent=1)
     agent.receive_message(msg)
     
     assert "Sender" in agent.relationships
-    assert agent.relationships["Sender"].trust == 3  # Friendly message
-    assert agent.relationships["Sender"].resentment == -1
+    assert agent.relationships["Sender"].trust == 5  # Friendly message
+    assert agent.relationships["Sender"].resentment == -2
 
 def test_prompt_building_includes_relationships(agent):
     """Test prompt includes significant relationships."""

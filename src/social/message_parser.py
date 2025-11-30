@@ -20,7 +20,8 @@ def parse_message_tone(text: str) -> str:
     # Hostile indicators
     hostile_keywords = [
         "betray", "enemy", "attack", "destroy", "fool", "liar", "hate", 
-        "stupid", "useless", "weak", "threat", "demand", "or else"
+        "stupid", "useless", "weak", "threat", "demand", "or else",
+        "crush", "disaster", "hoard", "greed", "suffering", "oppress"
     ]
     
     # Check for all caps (shouting) - heuristic: > 50% caps and length > 5

@@ -2,7 +2,7 @@ from typing import Tuple, List
 from loguru import logger
 from src.core.models import WorldState, Action, ActionType, Message
 from src.config.settings import WorldConfig
-from src.social.message_parser import parse_message_tone
+from src.config.settings import WorldConfig
 
 class World:
     """
@@ -77,6 +77,7 @@ class World:
             ActionType.IMPROVE_ENERGY: ("treasury", 3),
             ActionType.IMPROVE_INFRASTRUCTURE: ("treasury", 4),
             ActionType.BOOST_MORALE: ("food", 2),
+            ActionType.GENERATE_TREASURY: ("energy", 4),  # NEW: Sell energy for treasury
         }
         
         if action not in cost_map:
@@ -129,13 +130,18 @@ class World:
         if action.target in [None, "", "null", "everyone", "anyone"]:
             return False, f"Invalid target '{action.target}'. Must be specific agent or 'world'."
             
-        # Resource actions MUST target "world"
+        # Resource actions MUST target "world" (except boost_morale which can target 'population')
         if action.type in [
             ActionType.IMPROVE_FOOD, ActionType.IMPROVE_ENERGY,
-            ActionType.IMPROVE_INFRASTRUCTURE, ActionType.BOOST_MORALE
+            ActionType.IMPROVE_INFRASTRUCTURE,
+            ActionType.GENERATE_TREASURY
         ]:
             if action.target != "world":
                 return False, "Resource actions must target 'world'."
+        
+        elif action.type == ActionType.BOOST_MORALE:
+            if action.target not in ["world", "population"]:
+                return False, "boost_morale must target 'world' or 'population'."
                 
         # Social actions MUST target a valid agent
         elif action.type in [ActionType.SUPPORT_AGENT, ActionType.OPPOSE_AGENT]:
@@ -244,6 +250,20 @@ class World:
             
             self._clear_modifier(agent_name)
 
+        elif action.type == ActionType.GENERATE_TREASURY:
+            can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
+            if not can_afford:
+                return False, error
+            
+            # Convert energy to treasury at rate: 4 energy → 3 treasury
+            self.state.energy -= actual_cost
+            self.state.treasury += 3
+            
+            modifier_text = self._get_modifier_text(agent_name)
+            message = f"{agent_name} generated 3 treasury by selling energy (cost: {actual_cost} energy){modifier_text}."
+            
+            self._clear_modifier(agent_name)
+
         # Social Actions (free, but affect cost modifiers)
         elif action.type == ActionType.SUPPORT_AGENT:
             # Apply 50% cost reduction for target's next action
@@ -270,12 +290,11 @@ class World:
                 msg = Message(
                     sender=agent_name,
                     recipient=action.target,
-                    text=action.message,
-                    tone=parse_message_tone(action.message),
+                    content=action.message,
                     turn_sent=self.state.turn
                 )
                 self.state.message_queue.append(msg)
-                message = f"{agent_name} sent a message to {action.target}."
+                message = f"{agent_name} sent a message to {action.target}: \"{action.message}\""
             else:
                 success = False
                 message = "Message content or target missing."
@@ -292,6 +311,31 @@ class World:
         
         logger.info(message)
         return success, message
+
+    def check_terminal_state(self) -> Tuple[bool, str]:
+        """
+        Checks if the world has reached a terminal (game-over) state.
+        Returns (is_terminal, reason).
+        
+        Terminal conditions:
+        - Food = 0 (starvation)
+        - Energy = 0 (collapse)
+        - Treasury = 0 AND infrastructure < 20 (economic failure)
+        """
+        if self.state.food <= 0:
+            return True, "GAME OVER: Food supply exhausted - population starved"
+        
+        if self.state.energy <= 0:
+            return True, "GAME OVER: Energy depleted - system collapse"
+        
+        if self.state.treasury <= 0 and self.state.infrastructure < 20:
+            return True, "GAME OVER: Economic collapse - no treasury and failing infrastructure"
+        
+        # Critical morale = societal breakdown
+        if self.state.morale <= 5:
+            return True, "GAME OVER: Morale critical - society has collapsed"
+        
+        return False, ""
 
     def increment_turn(self):
         """

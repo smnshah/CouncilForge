@@ -1,13 +1,18 @@
 simulation:
-  max_turns: 5
-  model_name: "llama3.1:8b"
+  max_turns: 10
+  mode: "prod"  # "dev" = local Ollama, "prod" = Groq API
+  
+  # Model configuration per mode
+  dev_model: "llama3.1:8b"
+  prod_model: "openai/gpt-oss-120b"  # 120B parameter open ai model
+  
   llm_retries: 3
   log_level: "INFO"
   history_depth: 6
 
 world:
-  initial_treasury: 50
-  initial_food: 50
-  initial_energy: 50
-  initial_infrastructure: 50
-  initial_morale: 50
+  initial_treasury: 25      # Phase 1.7: Halved for economic pressure
+  initial_food: 35          # Phase 1.7: 30% reduction creates scarcity
+  initial_energy: 35        # Phase 1.7: 30% reduction creates scarcity
+  initial_infrastructure: 40  # Phase 1.7: 20% reduction (aging infrastructure)
+  initial_morale: 45        # Phase 1.7: Slight reduction (population tension)

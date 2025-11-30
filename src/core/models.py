@@ -4,11 +4,12 @@ from pydantic import BaseModel, Field
 from src.social.relationship_engine import Relationship
 
 class ActionType(str, Enum):
-    # Resource Actions (4)
+    # Resource Actions (5 - added generate_treasury)
     IMPROVE_FOOD = "improve_food"
     IMPROVE_ENERGY = "improve_energy"
     IMPROVE_INFRASTRUCTURE = "improve_infrastructure"
     BOOST_MORALE = "boost_morale"
+    GENERATE_TREASURY = "generate_treasury"
     
     # Social Actions (3)
     SUPPORT_AGENT = "support_agent"
@@ -21,14 +22,13 @@ class ActionType(str, Enum):
 class Message(BaseModel):
     sender: str
     recipient: str
-    text: str
-    tone: str = "neutral"
+    content: str
     turn_sent: int
 
 class Action(BaseModel):
     type: ActionType
     target: str = Field(..., description="Target of the action (e.g., 'world' or agent name)")
-    message: Optional[str] = Field(None, description="Content for messaging actions")
+    message: Optional[str] = Field(None, description="Content for messaging actions", alias="content")
     reason: Optional[str] = Field(None, description="Explanation for the action", alias="reasoning")
     
     class Config:
@@ -72,6 +72,7 @@ class AgentState(BaseModel):
 class Persona(BaseModel):
     name: str
     description: str
+    voice_instructions: Optional[str] = None
     goals: List[str]
     behavior_biases: List[str] # Keeping for backward compatibility
     

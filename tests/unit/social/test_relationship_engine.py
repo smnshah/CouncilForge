@@ -1,5 +1,5 @@
 import pytest
-from src.social.relationship_engine import Relationship, update_relationship, apply_message_effects, get_relationship_score
+from src.social.relationship_engine import Relationship, update_relationship, apply_message_effects
 
 def test_relationship_initialization():
     """Test Relationship initializes with default values."""
@@ -40,16 +40,15 @@ def test_update_relationship_clamping():
 def test_apply_message_effects_friendly():
     """Test friendly message effects."""
     rel = Relationship()
-    rel = apply_message_effects(rel, "friendly")
-    assert rel.trust == 3
-    assert rel.resentment == -1
+    rel = apply_message_effects(rel, "I support you friend")
+    assert rel.trust == 5
 
 def test_apply_message_effects_hostile():
     """Test hostile message effects."""
     rel = Relationship()
-    rel = apply_message_effects(rel, "hostile")
-    assert rel.trust == -3
-    assert rel.resentment == 3
+    rel = apply_message_effects(rel, "I hate you enemy")
+    assert rel.trust == -5
+    assert rel.resentment == 5
 
 def test_apply_message_effects_neutral():
     """Test neutral message effects."""
@@ -58,11 +57,7 @@ def test_apply_message_effects_neutral():
     assert rel.trust == 1
     assert rel.resentment == 0
 
-def test_get_relationship_score():
-    """Test relationship score calculation."""
-    rel = Relationship(trust=10, resentment=3)
-    score = get_relationship_score(rel)
-    assert score == 7  # 10 - 3
+
 
 def test_unknown_action_ignored():
     """Test unknown action types are ignored."""

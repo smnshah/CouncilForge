@@ -1,5 +1,10 @@
 import sys
 from loguru import logger
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 from src.utils.logging import setup_logging
 from src.simulation.controller import SimulationController
 

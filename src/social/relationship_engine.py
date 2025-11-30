@@ -5,6 +5,10 @@ Handles the logic for updating and querying agent relationships.
 """
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
+import logging
+from src.social.message_parser import parse_message_tone
+
+logger = logging.getLogger(__name__)
 
 class Relationship(BaseModel):
     """
@@ -25,8 +29,8 @@ RELATIONSHIP_DELTAS = {
     "support_agent": {"trust": 3, "resentment": -2},
     "oppose_agent": {"trust": -3, "resentment": 3},
     "send_message_neutral": {"trust": 1, "resentment": 0},
-    "send_message_friendly": {"trust": 3, "resentment": -1},
-    "send_message_hostile": {"trust": -3, "resentment": 3},
+    "send_message_friendly": {"trust": 5, "resentment": -2},
+    "send_message_hostile": {"trust": -5, "resentment": 5},
 }
 
 def update_relationship(
@@ -60,30 +64,37 @@ def update_relationship(
 
 def apply_message_effects(
     relationship: Relationship,
-    tone: str,
-    text: Optional[str] = None  # Kept for compatibility
+    content: Optional[str] = None
 ) -> Relationship:
     """
-    Applies the effects of a message on a relationship.
+    Applies the effects of a message on a relationship based on its tone.
     
     Args:
-        relationship: The relationship to update.
-        tone: The tone of the message ("friendly", "hostile", "neutral").
-        text: Optional text of the message (unused in Phase 1.5).
+        relationship: The current relationship object between two agents.
+        content: The content of the message to parse for tone.
         
     Returns:
-        The updated relationship.
+        The updated relationship object.
     """
-    action_map = {
-        "friendly": "send_message_friendly",
-        "hostile": "send_message_hostile",
-        "neutral": "send_message_neutral"
-    }
+    if content is None:
+        # If no content, apply a neutral contact effect
+        return update_relationship(relationship, "send_message_neutral")
+
+    # Parse tone from content
+    tone = parse_message_tone(content)
     
-    action_type = action_map.get(tone, "send_message_neutral")
+    # Determine the action type based on tone
+    action_type = "send_message_neutral"
+    if tone == "friendly":
+        action_type = "send_message_friendly"
+        logger.info(f"Relationship effect: Friendly Message detected from message content.")
+    elif tone == "hostile":
+        action_type = "send_message_hostile"
+        logger.info(f"Relationship effect: Hostile Message detected from message content.")
+    else:
+        logger.info(f"Relationship effect: Neutral Message detected from message content.")
+        
+    # Update relationship using the determined action type
     return update_relationship(relationship, action_type)
 
 
-def get_relationship_score(relationship: Relationship) -> int:
-    """Returns the calculated score for a relationship."""
-    return relationship.score

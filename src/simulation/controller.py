@@ -11,6 +11,7 @@ class SimulationController:
         self.world = World(self.config.world)
         self.llm_client = LLMClient(
             model_name=self.config.simulation.model_name,
+            mode=self.config.simulation.mode,
             retries=self.config.simulation.llm_retries
         )
         self.agents = [
@@ -37,7 +38,17 @@ class SimulationController:
             if self.world.state.message_queue:
                 logger.info(f"Distributing {len(self.world.state.message_queue)} messages...")
                 for msg in self.world.state.message_queue:
+                    # Try exact match first
                     recipient = self.agent_map.get(msg.recipient)
+                    
+                    # Try partial match if exact match fails
+                    if not recipient:
+                        target_first = msg.recipient.split()[0].lower()
+                        for name, agent in self.agent_map.items():
+                            if name.split()[0].lower() == target_first:
+                                recipient = agent
+                                break
+                    
                     if recipient:
                         recipient.receive_message(msg)
                     else:
@@ -48,16 +59,38 @@ class SimulationController:
 
             turn_passes = 0
             turn_events = []
+            current_turn_targeting = []  # Track social actions THIS turn
             
             for agent in self.agents:
                 # 1. Observe
                 observation = self.world.get_view()
                 
-                # 2. Decide
+                # 2. Decide (with awareness of what happened to this agent THIS turn)
                 logger.info(f"{agent.persona.name} is thinking...")
                 # Get list of other agents as valid targets
                 valid_targets = [a.persona.name for a in self.agents if a.persona.name != agent.persona.name]
-                action = agent.decide(observation, valid_targets)
+                
+                # Filter targeting events for this specific agent
+                targeting_me = [
+                    event for event in current_turn_targeting 
+                    if event['target'] == agent.persona.name
+                ]
+                
+                action = agent.decide(observation, valid_targets, targeting_me)
+                logger.info(f"{agent.persona.name} → {action.type.value} (target={action.target}): {action.reason}")
+                
+                # Sanitize target (remove brackets if LLM hallucinates them, replace underscores)
+                if action.target:
+                    action.target = action.target.replace('[', '').replace(']', '').replace('_', ' ')
+
+                # Track social actions for subsequent agents in THIS turn
+                if action.type.value in ['support_agent', 'oppose_agent', 'send_message']:
+                    current_turn_targeting.append({
+                        'actor': agent.persona.name,
+                        'type': action.type.value,
+                        'target': action.target,
+                        'reason': action.reason
+                    })
                 
                 # 3. Apply
                 valid_agents = [a.persona.name for a in self.agents]
@@ -85,6 +118,13 @@ class SimulationController:
                     break
             else:
                 consecutive_passes = 0
+
+            # Check for terminal world states (GAME OVER conditions)
+            is_terminal, terminal_reason = self.world.check_terminal_state()
+            if is_terminal:
+                logger.error(terminal_reason)
+                logger.info("Simulation terminated due to critical resource failure.")
+                break
 
             self.world.increment_turn()
 

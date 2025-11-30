@@ -4,26 +4,29 @@ from src.config.settings import WorldConfig
 from src.core.models import Action, ActionType
 
 @pytest.fixture
-def world():
-    """Create a test world with Phase 1.5 config."""
-    config = WorldConfig(
-        initial_treasury=50,
-        initial_food=50,
-        initial_energy=50,
-        initial_infrastructure=50,
-        initial_morale=50
+def world_config():
+    return WorldConfig(
+        initial_treasury=25,  # Phase 1.7: Scarcity
+        initial_food=35,
+        initial_energy=35,
+        initial_infrastructure=40,
+        initial_morale=45
     )
-    return World(config)
+
+@pytest.fixture
+def world(world_config):
+    """Create a test world with Phase 1.7 scarcity config."""
+    return World(world_config)
 
 def test_initial_state(world):
     """Test world initializes with correct state."""
-    assert world.state.treasury == 50
-    assert world.state.food == 50
-    assert world.state.energy == 50
-    assert world.state.infrastructure == 50
-    assert world.state.morale == 50
-    # Avg = 50, crisis = 100 - 50 = 50
-    assert world.state.crisis_level == 50
+    assert world.state.treasury == 25
+    assert world.state.food == 35
+    assert world.state.energy == 35
+    assert world.state.infrastructure == 40
+    assert world.state.morale == 45
+    # Avg = (25+35+35+40+45)/5 = 36, crisis = 100 - 36 = 64
+    assert world.state.crisis_level == 64
 
 def test_derived_metrics(world):
     """Test crisis level calculation."""
@@ -118,7 +121,7 @@ def test_cannot_afford_action(world):
     
     assert not success
     assert "cannot afford" in msg.lower() or "insufficient" in msg.lower()
-    assert world.state.food == 50  # Unchanged
+    assert world.state.food == 35  # Unchanged (Phase 1.7 initial)
 
 def test_resource_clamping(world):
     """Test resources clamp at 0."""
@@ -151,7 +154,7 @@ def test_send_message(world):
     assert len(world.state.message_queue) == 1
     assert world.state.message_queue[0].sender == "Agent1"
     assert world.state.message_queue[0].recipient == "Agent2"
-    assert world.state.message_queue[0].text == "Hello"
+    assert world.state.message_queue[0].content == "Hello"
 
 def test_support_agent(world):
     """Test support_agent social action."""

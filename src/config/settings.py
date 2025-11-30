@@ -10,11 +10,18 @@ class WorldConfig(BaseModel):
     initial_morale: int = 50
 
 class SimulationSettings(BaseModel):
+    mode: str = "dev"
     max_turns: int = 10
-    model_name: str = "llama3.1:8b"
+    dev_model: str = "llama3.1:8b"
+    prod_model: str = "llama-3.3-70b-versatile"
     llm_retries: int = 3
     log_level: str = "INFO"
-    history_depth: int = 2
+    history_depth: int = 6
+    
+    @property
+    def model_name(self) -> str:
+        """Returns the appropriate model based on mode."""
+        return self.prod_model if self.mode == "prod" else self.dev_model
 
 class Config(BaseModel):
     simulation: SimulationSettings

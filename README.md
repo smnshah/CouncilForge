@@ -12,9 +12,23 @@ The council is composed of three archetypal agents, each with a unique voice and
 - **Zara the Organizer:** A grassroots activist fighting for **Food** and **Morale**. Speaks with passion and collective language.
 - **Victoria the Strategist:** An establishment politician prioritizing **Stability** and **Budget**. Speaks with formal, calculated polish.
 
+### 🌍 World Simulation
+CouncilForge is not just a chat bot; it is a resource management simulation.
+- **5 Core Resources:**
+  - **Treasury:** Used to build infrastructure and energy.
+  - **Food:** Feeds the population and boosts morale.
+  - **Energy:** Powers food production and industry.
+  - **Infrastructure:** Supports the economy and prevents collapse.
+  - **Morale:** Represents the happiness of the people.
+- **Entropy:** Every turn, all resources decay due to consumption and wear. Agents must constantly act to prevent collapse.
+- **Action Economy:** Every resource action has a cost (e.g., `improve_food` costs **Energy**).
+- **Crisis Level:** A global metric tracking the city's instability. If it gets too high, the game ends.
+
 ### 🤝 Dynamic Social Engine
 Relationships are not static. They evolve in real-time based on:
 - **Actions:** Supporting or opposing an agent changes Trust and Resentment.
+    - **Support:** Grants the target a **50% discount** on their next action.
+    - **Oppose:** Penalizes the target with a **50% cost increase** on their next action.
 - **Tone Analysis:** The system analyzes the *emotional tone* of messages. Friendly messages build trust; hostile accusations fuel resentment.
 - **Memory:** Agents remember past betrayals and alliances.
 

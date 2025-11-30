@@ -1,6 +1,6 @@
 from typing import Tuple, List
 from loguru import logger
-from src.core.models import WorldState, Action, ActionType, Message
+from src.core.models import WorldState, Action, ActionType, Message, TurnEvent
 from src.config.settings import WorldConfig
 from src.config.settings import WorldConfig
 
@@ -86,15 +86,17 @@ class World:
         
         cost_resource, base_cost = cost_map[action]
         
-        # Apply cost modifier if agent has one
-        modifier = self.state.cost_modifiers.get(agent_name, 1.0)
-        actual_cost = int(base_cost * modifier)
+        # Phase 1.8: Output Modifiers means COST IS FIXED
+        actual_cost = base_cost
         
         current_amount = getattr(self.state, cost_resource)
         
-        if current_amount < actual_cost:
-            return False, cost_resource, actual_cost, f"Insufficient {cost_resource}: need {actual_cost}, have {current_amount}"
+        # Check affordability
+        can_afford = current_amount >= actual_cost
         
+        if not can_afford:
+            return False, cost_resource, actual_cost, f"Cannot afford {action.value} (needs {actual_cost} {cost_resource}, you have {current_amount})"
+                
         return True, cost_resource, actual_cost, ""
 
     def _normalize_agent_name(self, name: str) -> str:
@@ -181,7 +183,7 @@ class World:
                 
         return True, ""
 
-    def apply_action(self, agent_name: str, action: Action, valid_agents: List[str]) -> Tuple[bool, str]:
+    def apply_action(self, agent_name: str, action: Action, valid_agents: List[str]) -> Tuple[bool, TurnEvent]:
         """
         Applies an action to the world state.
         Returns (success, message).
@@ -189,81 +191,114 @@ class World:
         is_valid, error_msg = self.is_valid_action(action, agent_name, valid_agents)
         if not is_valid:
             logger.warning(f"{agent_name}'s action failed: {error_msg}")
-            return False, f"{agent_name}'s action failed: {error_msg}"
+            return False, TurnEvent(message=f"{agent_name}'s action failed: {error_msg}", visibility="public", actor=agent_name)
 
         message = ""
         success = True
 
-        # Resource Actions (with costs and modifiers)
+        # Resource Actions (Cost is now FIXED, Output is MODIFIED)
         if action.type == ActionType.IMPROVE_FOOD:
             can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
             if not can_afford:
-                return False, error
+                return False, TurnEvent(message=error, visibility="public", actor=agent_name)
             
-            # Deduct actual cost (with modifier applied)
+            # Deduct fixed cost
             self.state.energy -= actual_cost
-            self.state.food += 8
             
-            # Show modifier status if applied
-            modifier_text = self._get_modifier_text(agent_name)
-            message = f"{agent_name} improved food by 8 (cost: {actual_cost} energy){modifier_text}."
+            # Calculate Output with Modifier
+            modifier = self.state.cost_modifiers.pop(agent_name, 1.0) # Consume modifier
+            base_output = 8
+            actual_output = int(base_output * modifier)
             
-            # Clear modifier after use
-            self._clear_modifier(agent_name)
+            self.state.food += actual_output
+            
+            status_msg = ""
+            if modifier > 1.0: status_msg = " [SUPPORTED - +50% output]"
+            elif modifier < 1.0: status_msg = " [OPPOSED - -50% output]"
+            
+            message = f"{agent_name} improved food by {actual_output} (cost: {actual_cost} energy){status_msg}."
 
         elif action.type == ActionType.IMPROVE_ENERGY:
             can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
             if not can_afford:
-                return False, error
+                return False, TurnEvent(message=error, visibility="public", actor=agent_name)
             
             self.state.treasury -= actual_cost
-            self.state.energy += 8
             
-            modifier_text = self._get_modifier_text(agent_name)
-            message = f"{agent_name} improved energy by 8 (cost: {actual_cost} treasury){modifier_text}."
+            # Calculate Output with Modifier
+            modifier = self.state.cost_modifiers.pop(agent_name, 1.0)
+            base_output = 8
+            actual_output = int(base_output * modifier)
             
-            self._clear_modifier(agent_name)
+            self.state.energy += actual_output
+            
+            status_msg = ""
+            if modifier > 1.0: status_msg = " [SUPPORTED - +50% output]"
+            elif modifier < 1.0: status_msg = " [OPPOSED - -50% output]"
+            
+            message = f"{agent_name} improved energy by {actual_output} (cost: {actual_cost} treasury){status_msg}."
 
         elif action.type == ActionType.IMPROVE_INFRASTRUCTURE:
             can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
             if not can_afford:
-                return False, error
+                return False, TurnEvent(message=error, visibility="public", actor=agent_name)
             
             self.state.treasury -= actual_cost
-            self.state.infrastructure += 8
             
-            modifier_text = self._get_modifier_text(agent_name)
-            message = f"{agent_name} improved infrastructure by 8 (cost: {actual_cost} treasury){modifier_text}."
+            # Calculate Output with Modifier
+            modifier = self.state.cost_modifiers.pop(agent_name, 1.0)
+            base_output = 8
+            actual_output = int(base_output * modifier)
             
-            self._clear_modifier(agent_name)
+            self.state.infrastructure += actual_output
+            
+            status_msg = ""
+            if modifier > 1.0: status_msg = " [SUPPORTED - +50% output]"
+            elif modifier < 1.0: status_msg = " [OPPOSED - -50% output]"
+            
+            message = f"{agent_name} improved infrastructure by {actual_output} (cost: {actual_cost} treasury){status_msg}."
 
         elif action.type == ActionType.BOOST_MORALE:
             can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
             if not can_afford:
-                return False, error
+                return False, TurnEvent(message=error, visibility="public", actor=agent_name)
             
             self.state.food -= actual_cost
-            self.state.morale += 8
             
-            modifier_text = self._get_modifier_text(agent_name)
-            message = f"{agent_name} boosted morale by 8 (cost: {actual_cost} food){modifier_text}."
+            # Calculate Output with Modifier
+            modifier = self.state.cost_modifiers.pop(agent_name, 1.0)
+            base_output = 8
+            actual_output = int(base_output * modifier)
             
-            self._clear_modifier(agent_name)
+            self.state.morale += actual_output
+            
+            status_msg = ""
+            if modifier > 1.0: status_msg = " [SUPPORTED - +50% output]"
+            elif modifier < 1.0: status_msg = " [OPPOSED - -50% output]"
+            
+            message = f"{agent_name} boosted morale by {actual_output} (cost: {actual_cost} food){status_msg}."
 
         elif action.type == ActionType.GENERATE_TREASURY:
             can_afford, cost_resource, actual_cost, error = self._can_afford_action(action.type, agent_name)
             if not can_afford:
-                return False, error
+                return False, TurnEvent(message=error, visibility="public", actor=agent_name)
             
-            # Convert energy to treasury at rate: 4 energy → 3 treasury
+            # Convert energy to treasury at rate: 4 energy → 3 treasury (Base)
             self.state.energy -= actual_cost
-            self.state.treasury += 3
             
-            modifier_text = self._get_modifier_text(agent_name)
-            message = f"{agent_name} generated 3 treasury by selling energy (cost: {actual_cost} energy){modifier_text}."
+            # Calculate Output with Modifier
+            modifier = self.state.cost_modifiers.pop(agent_name, 1.0)
+            base_output = 3
+            actual_output = int(base_output * modifier)
             
-            self._clear_modifier(agent_name)
-
+            self.state.treasury += actual_output
+            
+            status_msg = ""
+            if modifier > 1.0: status_msg = " [SUPPORTED - +50% output]"
+            elif modifier < 1.0: status_msg = " [OPPOSED - -50% output]"
+            
+            message = f"{agent_name} generated {actual_output} treasury by selling energy (cost: {actual_cost} energy){status_msg}."
+            
         # Social Actions (free, but affect cost modifiers)
         elif action.type == ActionType.SUPPORT_AGENT:
             # Apply 50% cost reduction for target's next action
@@ -271,19 +306,18 @@ class World:
             target_agent = next((a for a in valid_agents if self._normalize_agent_name(a) == normalized_target), None)
             
             if target_agent:
-                self.state.cost_modifiers[target_agent] = 0.5
+                self.state.cost_modifiers[target_agent] = 1.5
                 self.state.morale += 5
-                message = f"{agent_name} supported {target_agent} (+5 morale, {target_agent}'s next action costs 50% less)."
+                message = f"{agent_name} supported {target_agent} (+5 morale, {target_agent}'s next action is 50% MORE effective)."
 
         elif action.type == ActionType.OPPOSE_AGENT:
-            # Apply 50% cost increase for target's next action
             normalized_target = self._normalize_agent_name(action.target)
             target_agent = next((a for a in valid_agents if self._normalize_agent_name(a) == normalized_target), None)
             
             if target_agent:
-                self.state.cost_modifiers[target_agent] = 1.5
+                self.state.cost_modifiers[target_agent] = 0.5
                 self.state.morale -= 3
-                message = f"{agent_name} opposed {target_agent} (-3 morale, {target_agent}'s next action costs 50% more)."
+                message = f"{agent_name} opposed {target_agent} (-3 morale, {target_agent}'s next action is 50% LESS effective)."
 
         elif action.type == ActionType.SEND_MESSAGE:
             if action.message and action.target:
@@ -310,7 +344,19 @@ class World:
         self._calculate_derived_metrics()
         
         logger.info(message)
-        return success, message
+        
+        # Construct TurnEvent
+        visibility = "private" if action.type == ActionType.SEND_MESSAGE else "public"
+        target_agent = action.target if visibility == "private" else None
+        
+        event = TurnEvent(
+            message=message,
+            visibility=visibility,
+            actor=agent_name,
+            target=target_agent
+        )
+        
+        return success, event
 
     def check_terminal_state(self) -> Tuple[bool, str]:
         """

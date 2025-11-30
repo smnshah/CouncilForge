@@ -99,13 +99,7 @@ class LLMAgent(BaseAgent):
             f"Turn action: {action.type.value}"
         )
     
-    def _calculate_cost(self, base_cost: int, world_state: WorldState) -> int:
-        """
-        Phase 1.7.1: CODE calculates costs with modifiers, not LLM.
-        Returns the actual cost after applying support/oppose modifiers.
-        """
-        modifier = world_state.cost_modifiers.get(self.persona.name, 1.0)
-        return int(base_cost * modifier)
+
     
     def _check_affordability(self, action_name: str, world_state: WorldState) -> Tuple[bool, str]:
         """
@@ -115,16 +109,15 @@ class LLMAgent(BaseAgent):
         if action_name not in RESOURCE_COSTS:
             return (True, f"✓ {action_name} - FREE")
         
-        resource_name, base_cost = RESOURCE_COSTS[action_name]
-        actual_cost = self._calculate_cost(base_cost, world_state)
-        current_amount = getattr(world_state, resource_name)
+        resource_name, cost = RESOURCE_COSTS[action_name]
+        available = getattr(world_state, resource_name)
         
-        can_afford = current_amount >= actual_cost
+        can_afford = available >= cost
         
         if can_afford:
-            return (True, f"✓ {action_name} - costs {actual_cost} {resource_name} (you have {current_amount})")
+            return (True, f"✓ {action_name} - costs {cost} {resource_name} (you have {available})")
         else:
-            return (False, f"✗ {action_name} - costs {actual_cost} {resource_name} (you only have {current_amount} ❌)")
+            return (False, f"✗ {action_name} - costs {cost} {resource_name} (you only have {available} ❌)")
     
     def _build_affordability_table(self, world_state: WorldState) -> str:
         """
@@ -200,10 +193,10 @@ class LLMAgent(BaseAgent):
         """Show if agent has cost modifier active."""
         if self.persona.name in world_state.cost_modifiers:
             modifier = world_state.cost_modifiers[self.persona.name]
-            if modifier == 0.5:
-                return "\n*** YOU ARE SUPPORTED: Your next resource action costs 50% less! ***"
-            elif modifier == 1.5:
-                return "\n*** YOU ARE OPPOSED: Your next resource action costs 50% more! ***"
+            if modifier == 1.5:
+                return "\n*** YOU ARE SUPPORTED: Your next resource action will be 50% MORE EFFECTIVE! ***"
+            elif modifier == 0.5:
+                return "\n*** YOU ARE OPPOSED: Your next resource action will be 50% LESS EFFECTIVE! ***"
         return ""
 
     def _build_prompt(self, world_state: WorldState, valid_targets: List[str], current_turn_targeting: List[Dict] = None) -> str:
@@ -240,9 +233,9 @@ TREASURY={world_state.treasury}  FOOD={world_state.food}  ENERGY={world_state.en
             targeting_lines = []
             for event in current_turn_targeting:
                 if event['type'] == 'support_agent':
-                    targeting_lines.append(f"• {event['actor']} supported you → your next action costs 50% less")
+                    targeting_lines.append(f"• {event['actor']} supported you → your next action is 50% MORE effective")
                 elif event['type'] == 'oppose_agent':
-                    targeting_lines.append(f"• {event['actor']} opposed you → your next action costs 50% more")
+                    targeting_lines.append(f"• {event['actor']} opposed you → your next action is 50% LESS effective")
                 elif event['type'] == 'send_message':
                     targeting_lines.append(f"• {event['actor']} sent you a message")
             
@@ -286,8 +279,8 @@ TREASURY={world_state.treasury}  FOOD={world_state.food}  ENERGY={world_state.en
         actions_section = f"""
 === AVAILABLE ACTIONS ===
 POLITICAL MOVES (always free):
-• support_agent → Empower an ally (50% discount + builds trust)
-• oppose_agent → Sabotage a rival (50% penalty + weakens them)
+• support_agent → Empower an ally (50% output boost + builds trust)
+• oppose_agent → Sabotage a rival (50% output penalty + weakens them)
 • send_message → Coordinate strategy, form alliances, negotiate deals
   Targets: {targets_str}
 

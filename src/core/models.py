@@ -34,6 +34,16 @@ class Action(BaseModel):
     class Config:
         populate_by_name = True
 
+class TurnEvent(BaseModel):
+    """
+    Represents a single event in a turn (action or message).
+    Used for filtering history based on visibility.
+    """
+    message: str = Field(..., description="The full log message")
+    visibility: str = Field(..., description="'public' or 'private'")
+    actor: str = Field(..., description="The agent who performed the action")
+    target: Optional[str] = Field(None, description="The target agent (if private)")
+
 class WorldState(BaseModel):
     # Core Resources
     treasury: int = Field(..., description="Nation's wealth/budget for development")

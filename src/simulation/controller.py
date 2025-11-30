@@ -94,8 +94,8 @@ class SimulationController:
                 
                 # 3. Apply
                 valid_agents = [a.persona.name for a in self.agents]
-                success, message = self.world.apply_action(agent.persona.name, action, valid_agents)
-                turn_events.append(f"Turn {current_turn + 1}: {message}")
+                success, event = self.world.apply_action(agent.persona.name, action, valid_agents)
+                turn_events.append(event)
                 
                 # 4. Broadcast Action to other agents (for relationship updates)
                 if success:
@@ -106,8 +106,23 @@ class SimulationController:
                     turn_passes += 1
             
             # Broadcast turn summary to all agents (History)
-            turn_summary = "\n".join(turn_events)
+            # Phase 1.8: Subjective History (Private Messaging)
             for agent in self.agents:
+                agent_history_lines = []
+                for event in turn_events:
+                    if event.visibility == "public":
+                        agent_history_lines.append(event.message)
+                    elif event.visibility == "private":
+                        # Only show if agent is sender or recipient
+                        if agent.persona.name == event.actor:
+                            agent_history_lines.append(event.message) # "You sent..."
+                        elif agent.persona.name == event.target:
+                            agent_history_lines.append(event.message) # "Sender sent you..."
+                        else:
+                            # Third party sees that a message was sent, but not the content
+                            agent_history_lines.append(f"{event.actor} sent a private message to {event.target}.")
+                
+                turn_summary = "\n".join(agent_history_lines)
                 agent.update_history(turn_summary)
             
             # Check termination condition (all agents passed)
